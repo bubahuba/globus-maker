@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 
+from distort import spherical_prewarp
 from stitch import stitch_tiles
 from tile_render import INPUT_SUPERSAMPLE, fetch_manifest, render_tiles, resolve_render_palette
 
@@ -171,6 +172,8 @@ async def process_job(payload: dict, work_root: Path) -> Path:
             background_color=render_palette.get("background", "#ffffff"),
             target_output_px=work_manifest.get("targetOutputPx"),
         )
+        # Pre-expand center so stereographic striping keeps stroke widths balanced.
+        await asyncio.to_thread(spherical_prewarp, input_jpg)
 
         await report_progress(
             callback_url,

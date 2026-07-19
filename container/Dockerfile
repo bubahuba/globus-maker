@@ -20,7 +20,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY slize.pl process.py stitch.py tile_render.py server.py ./
+COPY slize.pl process.py stitch.py tile_render.py distort.py server.py ./
 RUN chmod +x /app/slize.pl
 
 ENV PORT=8080

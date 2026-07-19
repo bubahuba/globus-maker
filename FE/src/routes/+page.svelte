@@ -14,7 +14,7 @@
 		LatLng,
 		StepUnit
 	} from '@lib/types';
-	import { createDefaultMapLayers } from '@shared/map-style';
+	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
 	import { clampTileZoom, INPUT_SUPERSAMPLE, MAX_SIDE_METERS } from '@shared/tile-constants';
 
 	const MIN_SIDE_METERS = 500;
@@ -40,7 +40,7 @@
 	let sideMeters = $state(2500);
 	let stripes = $state(12);
 	let diameterCm = $state(25);
-	let mapLayers = $state(createDefaultMapLayers());
+	let mapLayers = $state(loadMapLayers());
 
 	let estimate = $state<EstimateResponse | null>(null);
 	let estimateError = $state<string | null>(null);
@@ -133,6 +133,10 @@
 		stripes;
 		diameterCm;
 		scheduleEstimate();
+	});
+
+	$effect(() => {
+		saveMapLayers(mapLayers);
 	});
 
 	async function generateStripes() {
