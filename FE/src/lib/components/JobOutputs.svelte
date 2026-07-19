@@ -42,7 +42,17 @@
 		files.some((f) => f.toLowerCase() === 'input-distorted.jpg')
 	);
 
-	/** slize.pl writes out-00.jpg … out-(n-1).jpg */
+	/**
+	 * DePolar unwrap of the prewarped map (≤6000px).
+	 * Built after stripes finish so it appears with the other outputs.
+	 */
+	const spherePreviewFile = $derived(
+		files.some((f) => f.toLowerCase() === 'input-distorted-preview.jpg')
+			? 'input-distorted-preview.jpg'
+			: null
+	);
+
+	/** slize.pl writes out-00.jpg … out-(n-1).jpg — UI shows highest index first. */
 	const readyStripes = $derived.by(() => {
 		return files
 			.map((filename) => {
@@ -51,7 +61,7 @@
 				return { filename, index: Number(match[1]) };
 			})
 			.filter((item): item is { filename: string; index: number } => item != null)
-			.sort((a, b) => a.index - b.index);
+			.sort((a, b) => b.index - a.index);
 	});
 
 	const showPlaceholders = $derived(
@@ -59,20 +69,22 @@
 	);
 
 	const stripeSlots = $derived.by(() => {
-		const ready = readyStripes;
+		const readyByIndex = new Map(readyStripes.map((item) => [item.index, item.filename]));
 		const expected = Math.max(0, Number(stripeCount) || 0);
-		const slots: Array<{ key: string; filename: string | null }> = ready.map((item) => ({
-			key: item.filename,
-			filename: item.filename
-		}));
+		const maxReady = readyStripes.reduce((max, item) => Math.max(max, item.index), -1);
+		const total = showPlaceholders
+			? Math.max(expected, maxReady + 1)
+			: Math.max(0, maxReady + 1);
 
-		if (showPlaceholders) {
-			const total = Math.max(expected, ready.length);
-			for (let i = ready.length; i < total; i++) {
+		const slots: Array<{ key: string; filename: string | null }> = [];
+		for (let i = total - 1; i >= 0; i--) {
+			const filename = readyByIndex.get(i) ?? null;
+			if (filename) {
+				slots.push({ key: filename, filename });
+			} else if (showPlaceholders) {
 				slots.push({ key: `pending-${i}`, filename: null });
 			}
 		}
-
 		return slots;
 	});
 
@@ -121,15 +133,28 @@
 				{/each}
 			</div>
 
-			{#if jobId && distortedReady}
+			{#if jobId && spherePreviewFile}
 				<div class="space-y-2">
 					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
 					<p class="text-sm text-stone-500">
-						Globe view of the prewarped map (input-distorted.jpg). Loads once — not refreshed
-						when stripes finish.
+						Globe from an ImageMagick DePolar unwrap of the prewarped map (max 6000px).
+						Map centre is the north pole; scalloped south gaps use the land background.
 					</p>
-					<!-- Stable URL (no revision) so stripe uploads don't remount the globe. -->
-					<DistortedPanoramaViewer src={jobFileUrl(jobId, 'input-distorted.jpg')} />
+					<DistortedPanoramaViewer
+						src={jobFileUrl(jobId, spherePreviewFile, revision ?? undefined)}
+					/>
+				</div>
+			{:else if jobId && (distortedReady || readyStripes.length > 0)}
+				<div class="space-y-2">
+					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
+					<p class="text-sm text-stone-500">
+						{#if status === 'complete' || status === 'failed'}
+							Sphere preview was not available for this job. Rebuild the processor and run
+							again.
+						{:else}
+							Waiting for stripes to finish, then building the DePolar globe texture…
+						{/if}
+					</p>
 				</div>
 			{/if}
 

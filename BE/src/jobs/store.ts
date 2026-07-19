@@ -41,6 +41,8 @@ function sortJobFiles(files: Iterable<string>): string[] {
     if (b === "input.jpg") return 1;
     if (a === "input-distorted.jpg") return -1;
     if (b === "input-distorted.jpg") return 1;
+    if (a === "input-distorted-preview.jpg") return -1;
+    if (b === "input-distorted-preview.jpg") return 1;
     return a.localeCompare(b, undefined, { numeric: true });
   });
 }
@@ -97,7 +99,7 @@ export function isTerminalStatus(status: JobStatus): boolean {
   return status === "complete" || status === "failed";
 }
 
-const JOB_FILE_RE = /^(input|input-distorted|out-\d+)\.jpe?g$/i;
+const JOB_FILE_RE = /^(input|input-distorted|input-distorted-preview|out-\d+)\.jpe?g$/i;
 
 export function isAllowedJobFilename(name: string): boolean {
   return JOB_FILE_RE.test(name);

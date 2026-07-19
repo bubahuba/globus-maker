@@ -8,10 +8,12 @@ from pathlib import Path
 
 import httpx
 
-from distort import spherical_prewarp
+from distort import SPHERE_PREVIEW_MAX_EDGE, build_depolar_sphere_preview, spherical_prewarp
 from job_queue import JobCancelled
 from stitch import stitch_tiles
 from tile_render import INPUT_SUPERSAMPLE, fetch_manifest, render_tiles, resolve_render_palette
+
+SPHERE_PREVIEW_NAME = "input-distorted-preview.jpg"
 
 
 def _ensure_not_cancelled(cancel_event: asyncio.Event | None) -> None:
@@ -108,6 +110,34 @@ async def upload_job_file(callback_url: str | None, path: Path) -> bool:
     except Exception as exc:
         print(f"[globus] file upload failed ({path.name}): {exc}", flush=True)
         return False
+
+
+async def upload_sphere_preview_from_map(
+    callback_url: str | None,
+    work_dir: Path,
+    source: Path,
+    *,
+    background_color: str = "#e8eddb",
+) -> bool:
+    """DePolar-unwrap the centre-north map and upload for the globe viewer."""
+    if not source.is_file():
+        return False
+    preview = work_dir / SPHERE_PREVIEW_NAME
+    try:
+        await asyncio.to_thread(
+            build_depolar_sphere_preview,
+            source,
+            preview,
+            max_edge=SPHERE_PREVIEW_MAX_EDGE,
+            background_color=background_color,
+        )
+    except Exception as exc:
+        print(f"[globus] sphere DePolar preview failed: {exc}", flush=True)
+        return False
+    ok = await upload_job_file(callback_url, preview)
+    if not ok:
+        print(f"[globus] sphere preview upload failed ({SPHERE_PREVIEW_NAME})", flush=True)
+    return ok
 
 
 async def run_slize(
@@ -379,6 +409,14 @@ async def process_job(
                 "stepTotal": stripes,
                 "stepUnit": "stripe",
             },
+        )
+
+        # Globe texture: DePolar unwrap of the prewarped map (after stripes are done).
+        await upload_sphere_preview_from_map(
+            callback_url,
+            work_dir,
+            input_distorted,
+            background_color=base_fill,
         )
 
         _ensure_not_cancelled(cancel_event)

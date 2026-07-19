@@ -3,11 +3,11 @@
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-	/** Keep under typical WebGL MAX_TEXTURE_SIZE. */
-	const MAX_EDGE = 4096;
+	/** Client safety net; server already serves ≤6000px equirectangular preview. */
+	const MAX_EDGE = 6000;
 
 	interface Props {
-		/** URL of input-distorted.jpg (query string ignored for reload). */
+		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
 		src: string;
 		title?: string;
 	}
@@ -17,13 +17,20 @@
 	let container: HTMLDivElement | undefined = $state();
 	let statusMessage = $state('Loading sphere preview…');
 
-	/** Only the path matters — ignore ?v= cache-bust from stripe uploads. */
-	const stableSrc = $derived(src.split('?')[0] ?? '');
+	/** Include cache-bust query so a replaced preview reloads. */
+	const loadKey = $derived(src);
 
-	let loadedPath = '';
+	let loadedKey = '';
 	let renderer: THREE.WebGLRenderer | null = null;
 	let animationId = 0;
 	let resizeObserver: ResizeObserver | null = null;
+	let sceneResources: {
+		geometry: THREE.BufferGeometry;
+		material: THREE.Material;
+		texture: THREE.Texture;
+		controls: OrbitControls;
+		globe: THREE.Object3D;
+	} | null = null;
 
 	function disposeViewer() {
 		if (animationId) {
@@ -32,6 +39,13 @@
 		}
 		resizeObserver?.disconnect();
 		resizeObserver = null;
+		if (sceneResources) {
+			sceneResources.controls.dispose();
+			sceneResources.geometry.dispose();
+			sceneResources.material.dispose();
+			sceneResources.texture.dispose();
+			sceneResources = null;
+		}
 		if (renderer) {
 			renderer.dispose();
 			renderer.domElement.remove();
@@ -39,7 +53,7 @@
 		}
 	}
 
-	async function loadTexture(url: string): Promise<THREE.Texture> {
+	async function loadTexture(url: string): Promise<THREE.CanvasTexture> {
 		const img = new Image();
 		img.decoding = 'async';
 		img.src = url;
@@ -85,18 +99,9 @@
 		el.appendChild(webgl.domElement);
 		renderer = webgl;
 
-		const ambient = new THREE.AmbientLight(0xffffff, 0.85);
-		const key = new THREE.DirectionalLight(0xffffff, 0.65);
-		key.position.set(3, 2, 4);
-		scene.add(ambient, key);
-
+		// DePolar panorama: top = map centre (north pole), bottom = rim / south.
 		const geometry = new THREE.SphereGeometry(1, 96, 64);
-		// Outside of the sphere (globe), not inside a panorama.
-		const material = new THREE.MeshStandardMaterial({
-			map: texture,
-			roughness: 0.85,
-			metalness: 0.05
-		});
+		const material = new THREE.MeshBasicMaterial({ map: texture });
 		const globe = new THREE.Mesh(geometry, material);
 		scene.add(globe);
 
@@ -107,6 +112,8 @@
 		controls.maxDistance = 5;
 		controls.target.set(0, 0, 0);
 		controls.update();
+
+		sceneResources = { geometry, material, texture, controls, globe };
 
 		const fit = () => {
 			const w = el.clientWidth || 1;
@@ -132,17 +139,17 @@
 
 	$effect(() => {
 		const el = container;
-		const path = stableSrc;
-		if (!el || !path) return;
-		if (path === loadedPath && renderer) return;
+		const key = loadKey;
+		if (!el || !key) return;
+		if (key === loadedKey && renderer) return;
 
-		loadedPath = path;
+		loadedKey = key;
 		statusMessage = 'Loading sphere preview…';
 		let cancelled = false;
 
 		void (async () => {
 			try {
-				await mountGlobe(el, path);
+				await mountGlobe(el, key);
 				if (cancelled) disposeViewer();
 			} catch (err) {
 				if (cancelled) return;
@@ -159,7 +166,7 @@
 
 	onDestroy(() => {
 		disposeViewer();
-		loadedPath = '';
+		loadedKey = '';
 	});
 </script>
 
