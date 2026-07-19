@@ -1,0 +1,40 @@
+---
+description: Hono API and Cloudflare Worker backend patterns
+globs: BE/**/*,worker.ts,wrangler.jsonc
+alwaysApply: false
+---
+
+# Backend (BE/ + worker.ts)
+
+## Stack
+
+- Hono app in `BE/src/app.ts` — exported and reused by `worker.ts` and `dev-server.ts`
+- `isApiRequest()` gates API vs static asset serving in the Worker
+- Job state in R2 (`jobs/{id}/status.json`, `jobs/{id}/stripes.zip`) with in-memory cache fallback
+
+## Endpoints
+
+| Route | Purpose |
+|-------|---------|
+| `POST /api/estimate` | Preview zoom, tiles, stripe dimensions |
+| `POST /api/jobs` | Start job (`waitUntil` for async processing) |
+| `GET /api/jobs/:id` | Poll status |
+| `PATCH /api/jobs/:id/progress` | Processor callback |
+| `GET /api/jobs/:id/download` | Download zip |
+| `GET /api/geocode?q=` | Nominatim proxy |
+
+## Processor dispatch
+
+```typescript
+// Local: PROCESSOR_URL=http://localhost:8080 → POST /process
+// Prod: env.PROCESSOR.getByName(jobId).fetch("http://processor/process", ...)
+```
+
+Set `API_CALLBACK_ORIGIN` so Docker processor can PATCH progress (default `http://host.docker.internal:8787`).
+
+## Adding API fields
+
+1. Update `BE/src/types.ts` and `FE/src/lib/types.ts`
+2. Validate in `validateJobInput()` if part of `JobRequest`
+3. Pass through `ProcessPayload` if processor needs it
+4. Run `npm test` and `npm run typecheck`

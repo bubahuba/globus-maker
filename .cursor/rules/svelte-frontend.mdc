@@ -1,0 +1,40 @@
+---
+description: SvelteKit 5 frontend patterns for Globus Maker
+globs: FE/**/*
+alwaysApply: false
+---
+
+# Frontend (FE/)
+
+## Stack
+
+- Svelte 5 with runes enabled (`$state`, `$effect`, `$props`, `$derived`)
+- SvelteKit static adapter → `FE/build/`
+- Tailwind CSS 4 via `@tailwindcss/vite`
+- Leaflet + MapLibre GL for map preview
+
+## Aliases
+
+- `@lib` → `FE/src/lib`
+- `@shared` → `shared/` (map styles, layer defaults)
+
+## Patterns
+
+- API calls in `FE/src/lib/api/` — use relative `/api/*` paths (Vite proxies to `:8787`)
+- Components in `FE/src/lib/components/`; map helpers in `FE/src/lib/map/`
+- Use `createDefaultMapLayers()` from `@shared/map-style` for layer state
+- Debounce expensive API calls (see `scheduleEstimate` in `+page.svelte`)
+- Use sequence counters to ignore stale async responses
+
+## UI style
+
+- Tailwind utility classes; amber/stone palette
+- Rounded cards: `rounded-2xl bg-white shadow-sm ring-1 ring-stone-200`
+- No component library — keep markup simple and consistent with existing pages
+
+## Checks
+
+```bash
+npm run check --prefix FE   # svelte-check
+npm run build --prefix FE   # before deploy
+```

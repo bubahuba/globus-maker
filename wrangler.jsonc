@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "globus-maker",
+  "main": "worker.ts",
+  "compatibility_date": "2026-07-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "logs": { "enabled": true, "invocation_logs": true }
+  },
+  "assets": {
+    "directory": "./FE/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "globus-maker-artifacts"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "GlobusProcessor",
+      "image": "./container/Dockerfile",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROCESSOR",
+        "class_name": "GlobusProcessor"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GlobusProcessor"]
+    }
+  ],
+  "vars": {
+    "PROCESSOR_URL": ""
+  }
+}

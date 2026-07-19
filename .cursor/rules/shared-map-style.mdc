@@ -1,0 +1,26 @@
+---
+description: Shared map layer types and MapLibre style builders
+globs: shared/**/*
+alwaysApply: false
+---
+
+# Shared map style (`shared/map-style.ts`)
+
+Single source of truth for map layer configuration used by FE preview and processor rendering.
+
+## Layer keys
+
+`landForest`, `water`, `streets`, `buildings`, `streetNames`
+
+## Key exports
+
+- `DEFAULT_MAP_LAYERS` / `createDefaultMapLayers()` — UI defaults
+- `buildMapStyle(layers)` — MapLibre GL style JSON (OpenFreeMap vector tiles)
+- `buildRenderPalette(layers)` — flat colors for Python tile renderer
+- `validateMapLayers(input)` — sanitize API input (hex colors, booleans)
+
+## Rules
+
+- Add new layers to `MAP_LAYER_KEYS`, `MAP_LAYER_LABELS`, `DEFAULT_MAP_LAYERS`, both builders, and `RenderPalette`
+- FE imports via `@shared/map-style`; BE imports via relative `../../shared/map-style`
+- Keep FE `MapLayerKey` type aligned with shared exports

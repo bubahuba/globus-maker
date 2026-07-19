@@ -1,0 +1,15 @@
+services:
+  processor:
+    build: ./container
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - PORT=8080
+      - WORK_DIR=/tmp/globus-jobs
+    volumes:
+      - processor-data:/tmp/globus-jobs
+
+volumes:
+  processor-data:

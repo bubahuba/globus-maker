@@ -1,0 +1,34 @@
+---
+description: Python processor container and image pipeline
+globs: container/**/*
+alwaysApply: false
+---
+
+# Processor (container/)
+
+FastAPI server on `:8080`. Entry: `POST /process` with `ProcessPayload` JSON.
+
+## Pipeline (`process.py`)
+
+1. Render vector tiles → `tile_render.py`
+2. Stitch tiles → `stitch.py` → `input.jpg`
+3. Run `slize.pl` (Perl/Panotools) → `out-*.jpg` stripes
+4. Zip `input.jpg` + stripes → return to API
+
+## Progress callbacks
+
+PATCH `callbackUrl` with `{ status, progress, stepCurrent, stepTotal, stepUnit }`.
+Statuses must match `JobStatus` in `BE/src/types.ts`.
+
+## Local testing
+
+```bash
+docker compose up --build processor
+curl http://localhost:8080/health
+```
+
+## Tile rendering (`tile_render.py`)
+
+Fetches OpenFreeMap vector tiles (max zoom **14**). When `manifest.zoom` is higher, tiles are **overzoomed** — parent z14 tiles are rendered, cropped, and upscaled (same as MapLibre preview).
+
+Do not fetch vector tiles above maxzoom; they return empty and produce solid terrain-color output.

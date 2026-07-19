@@ -1,0 +1,38 @@
+---
+description: Globus Maker architecture, layout, and cross-cutting conventions
+alwaysApply: true
+---
+
+# Globus Maker
+
+Web app to download an OSM region and generate globe meridian stripes (Panotools `slize.pl` pipeline).
+
+## Layout
+
+| Path | Role |
+|------|------|
+| `FE/` | SvelteKit 5 static SPA + Leaflet/MapLibre |
+| `BE/src/` | Hono API (shared by Worker and local dev server) |
+| `worker.ts` | Cloudflare Worker entry — routes `/api/*` to Hono, else static assets |
+| `container/` | Python/FastAPI processor (tile fetch, stitch, `slize.pl`, zip) |
+| `shared/` | Cross-stack code (`map-style.ts`) imported via `@shared` alias |
+
+## Local dev
+
+`npm run dev` — starts processor (Docker `:8080`), API (`:8787`), and FE (`:5173`).
+
+Individual services: `dev:processor`, `dev:api`, `dev:fe`. Skip processor: `npm run dev -- --no-processor`.
+
+## Production
+
+- Worker serves `FE/build` via `ASSETS` binding
+- Jobs/artifacts in R2 bucket `globus-maker-artifacts`
+- Processor via `GlobusProcessor` Container DO binding (leave `PROCESSOR_URL` empty)
+
+## Conventions
+
+- Keep `BE/src/types.ts` and `FE/src/lib/types.ts` in sync for API contracts
+- Map layer types/logic live in `shared/map-style.ts` — don't duplicate
+- Tile math lives in `BE/src/osm/tile-math.ts`; run `npm test` after changes
+- Stripe height: `diameterCm × 160` px; width formula in `stripeWidthPx()`
+- Job statuses: `queued` → `fetching_tiles` → `stitching` → `projecting` → `packaging` → `complete` | `failed`

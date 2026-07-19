@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+.dev.vars
+.wrangler/
+FE/build/
+FE/.svelte-kit/
+dist/
+*.zip
+*.jpg
+*.pto
