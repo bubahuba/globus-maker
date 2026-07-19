@@ -1,15 +1,19 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import MapSelector from '@lib/components/MapSelector.svelte';
 	import MapLayerControls from '@lib/components/MapLayerControls.svelte';
 	import PlaceSearch from '@lib/components/PlaceSearch.svelte';
 	import JobCard from '@lib/components/JobCard.svelte';
-	import { createJob, estimateJob, pollJob } from '@lib/api/jobs';
+	import JobOutputs from '@lib/components/JobOutputs.svelte';
+	import { cancelJob, createJob, estimateJob, getJob, pollJob } from '@lib/api/jobs';
 	import type { GeocodeResult } from '@lib/api/geocode';
 	import type {
 		CreateJobResponse,
 		EstimateResponse,
 		JobRequest,
+		JobResponse,
 		JobStatus,
 		LatLng,
 		StepUnit
@@ -37,10 +41,12 @@
 	}
 
 	let center = $state<LatLng | null>(null);
+	let placeName = $state<string | null>(null);
 	let sideMeters = $state(2500);
 	let stripes = $state(12);
 	let diameterCm = $state(25);
 	let mapLayers = $state(loadMapLayers());
+	let downloadFilename = $state<string | null>(null);
 
 	let estimate = $state<EstimateResponse | null>(null);
 	let estimateError = $state<string | null>(null);
@@ -53,11 +59,121 @@
 	let jobStatus = $state<JobStatus | null>(null);
 	let jobProgress = $state(0);
 	let jobError = $state<string | null>(null);
+	let jobFiles = $state<string[]>([]);
+	let artifactsAvailable = $state(true);
+	let jobUpdatedAt = $state<string | null>(null);
 	let jobManifest = $state<CreateJobResponse['manifest'] | null>(null);
 	let jobStepCurrent = $state<number | undefined>(undefined);
 	let jobStepTotal = $state<number | undefined>(undefined);
 	let jobStepUnit = $state<StepUnit | undefined>(undefined);
+	let jobQueuePosition = $state<number | undefined>(undefined);
+	let jobQueueLength = $state<number | undefined>(undefined);
 	let submitting = $state(false);
+	let openingJob = $state(false);
+
+	/** Bumps to abort an in-flight poll when switching jobs. */
+	let pollEpoch = 0;
+
+	const jobActive = $derived(
+		!!jobId && jobStatus != null && jobStatus !== 'complete' && jobStatus !== 'failed'
+	);
+
+	function setJobInUrl(id: string | null) {
+		const url = new URL(page.url);
+		if (id) url.searchParams.set('job', id);
+		else url.searchParams.delete('job');
+		const next = `${url.pathname}${url.search}${url.hash}`;
+		const current = `${page.url.pathname}${page.url.search}${page.url.hash}`;
+		if (next === current) return;
+		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	function applyJobSnapshot(job: JobResponse) {
+		jobId = job.id;
+		jobStatus = job.status;
+		jobProgress = job.progress;
+		jobError = job.error ?? null;
+		jobStepCurrent = job.stepCurrent;
+		jobStepTotal = job.stepTotal;
+		jobStepUnit = job.stepUnit;
+		jobQueuePosition = job.queuePosition;
+		jobQueueLength = job.queueLength;
+		jobFiles = job.files ?? [];
+		artifactsAvailable = job.artifactsAvailable !== false;
+		if (job.updatedAt) jobUpdatedAt = job.updatedAt;
+		if (job.downloadFilename) downloadFilename = job.downloadFilename;
+		else if (job.status === 'complete' && !artifactsAvailable) downloadFilename = null;
+
+		if (job.stripeCount != null) stripes = job.stripeCount;
+		if (job.diameterCm != null) diameterCm = job.diameterCm;
+		if (job.sideMeters != null) sideMeters = job.sideMeters;
+		if (job.center) center = job.center;
+		if (job.placeName) placeName = job.placeName;
+
+		if (job.stripeHeightPx != null && job.stripeWidthPx != null) {
+			jobManifest = {
+				zoom: estimate?.zoom ?? 14,
+				tileCount: estimate?.tileCount ?? 0,
+				outputSizePx: estimate?.targetOutputPx ?? job.stripeHeightPx,
+				stripeHeightPx: job.stripeHeightPx,
+				stripeWidthPx: job.stripeWidthPx
+			};
+		}
+	}
+
+	async function openJob(id: string, options?: { scroll?: boolean }) {
+		const jobKey = id.trim();
+		if (!jobKey) return;
+
+		const epoch = ++pollEpoch;
+		openingJob = true;
+		jobError = null;
+		setJobInUrl(jobKey);
+
+		try {
+			const job = await getJob(jobKey);
+			if (epoch !== pollEpoch) return;
+			applyJobSnapshot(job);
+			if (options?.scroll !== false) {
+				if (job.files?.length) void scrollToJobOutputs();
+				else void scrollToJobSection();
+			}
+
+			if (job.status !== 'complete' && job.status !== 'failed') {
+				submitting = true;
+				try {
+					await pollJob(
+						jobKey,
+						(update) => {
+							if (epoch !== pollEpoch) return;
+							const prevFileCount = jobFiles.length;
+							applyJobSnapshot(update);
+							if (prevFileCount === 0 && (update.files?.length ?? 0) > 0) {
+								void scrollToJobOutputs();
+							}
+						},
+						400
+					);
+				} finally {
+					if (epoch === pollEpoch) submitting = false;
+				}
+			}
+		} catch (error) {
+			if (epoch !== pollEpoch) return;
+			jobId = jobKey;
+			jobStatus = 'failed';
+			jobError = error instanceof Error ? error.message : 'Job not found';
+			jobManifest = jobManifest ?? {
+				zoom: 14,
+				tileCount: 0,
+				outputSizePx: 0,
+				stripeHeightPx: 0,
+				stripeWidthPx: 0
+			};
+		} finally {
+			if (epoch === pollEpoch) openingJob = false;
+		}
+	}
 
 	function estimateToManifest(): CreateJobResponse['manifest'] | null {
 		if (!estimate) return null;
@@ -73,6 +189,11 @@
 	async function scrollToJobSection() {
 		await tick();
 		document.getElementById('job-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+	}
+
+	async function scrollToJobOutputs() {
+		await tick();
+		document.getElementById('job-outputs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
 	async function refreshEstimate() {
@@ -114,6 +235,7 @@
 			sideMeters,
 			stripes,
 			diameterCm,
+			...(placeName ? { placeName } : {}),
 			mapLayers
 		};
 	}
@@ -124,6 +246,7 @@
 
 	function onPlaceSelect(result: GeocodeResult) {
 		center = { lat: result.lat, lng: result.lng };
+		placeName = result.displayName.split(',')[0]?.trim() || result.displayName;
 	}
 
 	$effect(() => {
@@ -139,43 +262,84 @@
 		saveMapLayers(mapLayers);
 	});
 
+	$effect(() => {
+		if (!jobActive || !jobId) return;
+		const activeJobId = jobId;
+
+		const onPageHide = () => {
+			cancelJob(activeJobId);
+		};
+		const onBeforeUnload = (event: BeforeUnloadEvent) => {
+			event.preventDefault();
+			event.returnValue = '';
+		};
+
+		window.addEventListener('pagehide', onPageHide);
+		window.addEventListener('beforeunload', onBeforeUnload);
+		return () => {
+			window.removeEventListener('pagehide', onPageHide);
+			window.removeEventListener('beforeunload', onBeforeUnload);
+		};
+	});
+
+	// Restore job from ?job=<id> (once per distinct id in the URL).
+	$effect(() => {
+		const fromUrl = page.url.searchParams.get('job')?.trim() ?? '';
+		if (!fromUrl || fromUrl === jobId || openingJob || submitting) return;
+		void openJob(fromUrl);
+	});
+
 	async function generateStripes() {
 		if (!center) return;
 
+		if (jobId && jobStatus && jobStatus !== 'complete' && jobStatus !== 'failed') {
+			cancelJob(jobId);
+		}
+
+		const epoch = ++pollEpoch;
 		submitting = true;
 		jobError = null;
 		jobStatus = 'queued';
 		jobProgress = 0;
 		jobId = null;
+		jobFiles = [];
+		artifactsAvailable = true;
+		jobUpdatedAt = null;
+		downloadFilename = null;
 		jobManifest = estimateToManifest();
 		jobStepCurrent = undefined;
 		jobStepTotal = undefined;
 		jobStepUnit = undefined;
+		jobQueuePosition = undefined;
+		jobQueueLength = undefined;
 		void scrollToJobSection();
 
 		try {
 			const created = await createJob(currentRequest());
+			if (epoch !== pollEpoch) return;
 			jobId = created.jobId;
 			jobStatus = created.status;
 			jobManifest = created.manifest;
+			setJobInUrl(created.jobId);
 
 			await pollJob(
 				created.jobId,
 				(job) => {
-					jobStatus = job.status;
-					jobProgress = job.progress;
-					jobError = job.error ?? null;
-					jobStepCurrent = job.stepCurrent;
-					jobStepTotal = job.stepTotal;
-					jobStepUnit = job.stepUnit;
+					if (epoch !== pollEpoch) return;
+					const prevFileCount = jobFiles.length;
+					applyJobSnapshot(job);
+					if (prevFileCount === 0 && (job.files?.length ?? 0) > 0) {
+						void scrollToJobOutputs();
+					}
 				},
 				400
 			);
 		} catch (error) {
+			if (epoch !== pollEpoch) return;
 			jobError = error instanceof Error ? error.message : 'Failed to start job';
 			jobStatus = 'failed';
 		} finally {
-			submitting = false;
+			if (epoch === pollEpoch) submitting = false;
 		}
 	}
 </script>
@@ -208,6 +372,15 @@
 					stepCurrent={jobStepCurrent}
 					stepTotal={jobStepTotal}
 					stepUnit={jobStepUnit}
+					queuePosition={jobQueuePosition}
+					queueLength={jobQueueLength}
+					{downloadFilename}
+					{artifactsAvailable}
+					ondownloaded={() => {
+						artifactsAvailable = false;
+						jobFiles = [];
+						downloadFilename = null;
+					}}
 				/>
 			{/if}
 
@@ -311,4 +484,16 @@
 			</div>
 		</aside>
 	</div>
+
+	{#if jobId && (jobStatus === 'stitching' || jobStatus === 'projecting' || jobStatus === 'packaging' || jobStatus === 'complete' || jobFiles.length > 0)}
+		<JobOutputs
+			jobId={jobId}
+			files={jobFiles}
+			stripeCount={stripes}
+			status={jobStatus}
+			revision={jobUpdatedAt}
+			{artifactsAvailable}
+			visible={true}
+		/>
+	{/if}
 </main>

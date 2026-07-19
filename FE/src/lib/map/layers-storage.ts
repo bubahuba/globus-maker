@@ -1,5 +1,6 @@
 import {
 	createDefaultMapLayers,
+	ensureBaseFill,
 	validateMapLayers,
 	type MapLayerStyle
 } from '@shared/map-style';
@@ -26,7 +27,7 @@ export function saveMapLayers(layers: MapLayerStyle): void {
 	if (typeof localStorage === 'undefined') return;
 
 	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(layers));
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(ensureBaseFill(layers)));
 	} catch {
 		// QuotaExceededError / private mode — ignore
 	}

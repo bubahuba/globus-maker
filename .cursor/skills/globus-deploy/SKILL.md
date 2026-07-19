@@ -31,7 +31,7 @@ npm run deploy:worker   # skip container rollout
 Leave `PROCESSOR_URL` empty in `wrangler.jsonc` vars. Worker uses:
 
 ```typescript
-env.PROCESSOR.getByName(jobId).fetch("http://processor/process", ...)
+env.PROCESSOR.getByName("shared").fetch("http://processor/process", ...)
 ```
 
 ## Local vs production

@@ -35,6 +35,25 @@ export async function getJob(
   return structuredClone(job);
 }
 
+function sortJobFiles(files: Iterable<string>): string[] {
+  return [...files].sort((a, b) => {
+    if (a === "input.jpg") return -1;
+    if (b === "input.jpg") return 1;
+    if (a === "input-distorted.jpg") return -1;
+    if (b === "input-distorted.jpg") return 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+}
+
+function mergeJobFiles(...lists: Array<string[] | undefined>): string[] | undefined {
+  const merged = new Set<string>();
+  for (const list of lists) {
+    for (const name of list ?? []) merged.add(name);
+  }
+  if (merged.size === 0) return undefined;
+  return sortJobFiles(merged);
+}
+
 export async function updateJobProgress(
   bucket: R2Bucket | undefined,
   id: string,
@@ -57,6 +76,18 @@ export async function updateJobProgress(
     delete job.stepTotal;
     delete job.stepUnit;
   }
+  if (update.status === "queued" && update.queuePosition != null) {
+    job.queuePosition = update.queuePosition;
+    job.queueLength = update.queueLength;
+  } else {
+    delete job.queuePosition;
+    delete job.queueLength;
+  }
+
+  // Preserve files added concurrently by upload handlers (avoid lost updates).
+  const latestFiles = mergeJobFiles(job.files, memoryJobs.get(id)?.files);
+  if (latestFiles) job.files = latestFiles;
+  else delete job.files;
 
   await saveJob(bucket, job);
   return job;
@@ -64,4 +95,25 @@ export async function updateJobProgress(
 
 export function isTerminalStatus(status: JobStatus): boolean {
   return status === "complete" || status === "failed";
+}
+
+const JOB_FILE_RE = /^(input|input-distorted|out-\d+)\.jpe?g$/i;
+
+export function isAllowedJobFilename(name: string): boolean {
+  return JOB_FILE_RE.test(name);
+}
+
+export async function addJobFile(
+  bucket: R2Bucket | undefined,
+  id: string,
+  filename: string,
+): Promise<JobRecord | null> {
+  const job = await getJob(bucket, id);
+  if (!job) return null;
+
+  job.files = mergeJobFiles(job.files, memoryJobs.get(id)?.files, [filename]) ?? [filename];
+  // Always bump updatedAt so clients can cache-bust replaced preview bytes.
+  job.updatedAt = new Date().toISOString();
+  await saveJob(bucket, job);
+  return job;
 }

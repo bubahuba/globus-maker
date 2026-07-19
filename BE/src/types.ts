@@ -21,6 +21,8 @@ export interface JobRequest {
   sideMeters: number;
   stripes: number;
   diameterCm: number;
+  /** Short place label for download naming (e.g. city from geocode). */
+  placeName?: string;
   mapLayers?: MapLayerStyle;
 }
 
@@ -46,6 +48,17 @@ export interface JobRecord {
   stepCurrent?: number;
   stepTotal?: number;
   stepUnit?: StepUnit;
+  /** 1-based place in the processor queue (includes the running job). */
+  queuePosition?: number;
+  /** Total jobs in the processor line (waiting + running). */
+  queueLength?: number;
+  /** Previewable JPEG filenames uploaded so far (input.jpg, out-1.jpg, …). */
+  files?: string[];
+  /**
+   * False after zip download or TTL purge — zip/previews are gone.
+   * Undefined/true means artifacts may still be available.
+   */
+  artifactsAvailable?: boolean;
   createdAt: string;
   updatedAt: string;
   request: JobRequest;
@@ -87,6 +100,7 @@ export interface ProcessPayload {
   stripes: number;
   diameterCm: number;
   stripeHeightPx: number;
+  placeName?: string;
   mapLayers: MapLayerStyle;
   mapStyle: Record<string, unknown>;
   renderPalette: RenderPalette;
@@ -100,4 +114,6 @@ export interface ProgressUpdate {
   stepCurrent?: number;
   stepTotal?: number;
   stepUnit?: StepUnit;
+  queuePosition?: number;
+  queueLength?: number;
 }

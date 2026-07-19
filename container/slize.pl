@@ -18,8 +18,12 @@ use Math::Round;
 sub slizik {
 	my ($cfg, $yaw, $outfile) = @_;
 
-	# Generic options
-	my $format = "JPEG c:$cfg->{quality}";
+	# PNG keeps uncovered projection samples transparent; JPEG would fill black.
+	my $format = "PNG";
+	my $bg     = $cfg->{background} // '#e8eddb';
+	my ($stem) = $outfile =~ /^(.*)\.[^.]+$/;
+	$stem = $outfile unless defined $stem;
+	my $pngfile = "$stem.png";
 
 	# Pitch and roll
 	my $pitch = 90; # city centre: equator/poles?
@@ -48,26 +52,38 @@ sub slizik {
 	print $F "v r0\nv p0\nv y0\nv\n";
 	close $F;
 
-	# Remap the image
+	# Remap the image (prefix without extension; nona adds .png from format)
 	print "NONA ";
-	system("nona -o $outfile $cfg->{ptofile}") == 0 or die "Could not remap image";
+	system("nona -o $stem $cfg->{ptofile}") == 0 or die "Could not remap image";
+	die "Could not find nona output $pngfile" unless -e $pngfile;
 
 	my $stripe_w = $right - $left;
 	my $stripe_h = $bot - $top;
-	my ($outw, $outh) = `identify -format "%w %h" $outfile` =~ /(\d+) (\d+)/;
+	my ($outw, $outh) = `identify -format "%w %h" $pngfile` =~ /(\d+) (\d+)/;
 
 	# Modern nona (hugin-tools) already crops to the S region; older macOS Hugin
 	# returned the full canvas and needed a follow-up mogrify crop.
 	if (!defined $outw || $outw != $stripe_w || $outh != $stripe_h) {
-		print "POSTPROC ";
+		print "CROP ";
 		system("mogrify "
-			. "-quality $cfg->{quality} "
 			. "-crop "
 				. $stripe_w."x".$stripe_h
 				. "+".$left."+".$top." "
-			. "$outfile"
+			. "+repage "
+			. "$pngfile"
 		) == 0 or die "Could not postprocess image.";
 	}
+
+	# Flatten transparent (missing) regions onto the map land color.
+	print "BG ";
+	system("convert "
+		. "$pngfile "
+		. "-background '$bg' "
+		. "-flatten "
+		. "-quality $cfg->{quality} "
+		. "$outfile"
+	) == 0 or die "Could not flatten stripe onto background";
+	unlink $pngfile;
 
 	print "- OK\n";
 }
@@ -86,12 +102,14 @@ sub print_help {
 
 # Default config, >>optionlist<<
 my %cfg = (
-	outprefix => 'out',
-	srcfile   => 'input.jpg',
-	height    => 3600,
-	stripes   => 12,
-	ptofile	  => 'ptofile.pto',
-	quality   => 95
+	outprefix   => 'out',
+	srcfile     => 'input.jpg',
+	height      => 3600,
+	stripes     => 12,
+	ptofile     => 'ptofile.pto',
+	quality     => 95,
+	# Land / map fill for uncovered projection samples (override via --background).
+	background  => '#e8eddb',
 );
 
 # Process the cmdline

@@ -13,12 +13,21 @@ import {
 } from "./osm/tile-math";
 import { buildMapStyle, buildRenderPalette, validateMapLayers } from "../../shared/map-style";
 import {
+  addJobFile,
   createJobId,
   getJob,
+  isAllowedJobFilename,
+  isTerminalStatus,
   saveJob,
   updateJobProgress,
 } from "./jobs/store";
-import { getArtifact, putArtifact } from "./jobs/artifacts";
+import {
+  getArtifact,
+  purgeJobArtifacts,
+  purgeJobArtifactsIfExpired,
+  putArtifact,
+} from "./jobs/artifacts";
+import { stripeZipFilename } from "./jobs/filename";
 
 const DEV_ORIGINS = [
   "http://localhost:5173",
@@ -26,6 +35,9 @@ const DEV_ORIGINS = [
   "http://localhost:8787",
   "http://127.0.0.1:8787",
 ];
+
+/** Shared processor instance so all jobs share one queue. */
+const PROCESSOR_INSTANCE = "shared";
 
 export const app = new Hono<{ Bindings: Env }>();
 
@@ -37,7 +49,7 @@ app.use(
       if (DEV_ORIGINS.includes(origin)) return origin;
       return origin;
     },
-    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   }),
 );
 
@@ -46,9 +58,12 @@ export function isApiRequest(request: Request): boolean {
   return pathname === "/health" || pathname.startsWith("/api/");
 }
 
+function processorBase(env: Env): string {
+  return (env.PROCESSOR_URL ?? "").replace(/\/$/, "");
+}
+
 async function dispatchToProcessor(
   env: Env,
-  jobId: string,
   payload: ProcessPayload,
 ): Promise<Response> {
   const body = JSON.stringify(payload);
@@ -57,7 +72,7 @@ async function dispatchToProcessor(
     if (!env.PROCESSOR) {
       throw new Error("No processor configured (set PROCESSOR_URL for local dev)");
     }
-    const container = env.PROCESSOR.getByName(jobId);
+    const container = env.PROCESSOR.getByName(PROCESSOR_INSTANCE);
     return container.fetch("http://processor/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -65,11 +80,49 @@ async function dispatchToProcessor(
     });
   }
 
-  return fetch(`${env.PROCESSOR_URL.replace(/\/$/, "")}/process`, {
+  return fetch(`${processorBase(env)}/process`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
   });
+}
+
+async function cancelOnProcessor(env: Env, jobId: string): Promise<void> {
+  try {
+    if (!env.PROCESSOR_URL) {
+      if (!env.PROCESSOR) return;
+      const container = env.PROCESSOR.getByName(PROCESSOR_INSTANCE);
+      await container.fetch(`http://processor/process/${jobId}`, { method: "DELETE" });
+      return;
+    }
+    await fetch(`${processorBase(env)}/process/${encodeURIComponent(jobId)}`, {
+      method: "DELETE",
+    });
+  } catch {
+    // Best-effort: job may not have reached the processor yet.
+  }
+}
+
+async function cancelJob(env: Env, jobId: string): Promise<JobRecord | null> {
+  const job = await getJob(env.ARTIFACTS, jobId);
+  if (!job) return null;
+
+  const alreadyCancelled = job.status === "failed" && job.error === "Cancelled";
+  // Don't wipe a successful/failed-for-other-reason job; do clean on cancel (incl. retries).
+  if (isTerminalStatus(job.status) && !alreadyCancelled) return job;
+
+  if (!isTerminalStatus(job.status)) {
+    await updateJobProgress(env.ARTIFACTS, jobId, {
+      status: "failed",
+      progress: 0,
+      error: "Cancelled",
+    });
+  }
+
+  // Drop uploaded previews/zip from API storage, then stop processor + wipe its work dir.
+  await purgeJobArtifacts(env.ARTIFACTS, jobId);
+  await cancelOnProcessor(env, jobId);
+  return (await getJob(env.ARTIFACTS, jobId)) ?? job;
 }
 
 async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
@@ -89,24 +142,28 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
     stripes: job.request.stripes,
     diameterCm: job.request.diameterCm,
     stripeHeightPx: stripeH,
+    placeName: job.request.placeName,
     mapLayers,
     mapStyle: buildMapStyle(mapLayers),
     renderPalette: buildRenderPalette(mapLayers),
   };
 
   try {
-    await updateJobProgress(env.ARTIFACTS, job.id, {
-      status: "fetching_tiles",
-      progress: 5,
-      stepCurrent: 0,
-      stepTotal: manifest.tiles.length * 2,
-      stepUnit: "tile",
-    });
+    const current = await getJob(env.ARTIFACTS, job.id);
+    if (current?.error === "Cancelled" || current?.status === "failed") {
+      return;
+    }
 
-    const response = await dispatchToProcessor(env, job.id, payload);
+    const response = await dispatchToProcessor(env, payload);
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || `Processor failed with ${response.status}`);
+      const cancelled = response.status === 409 || /cancel/i.test(text);
+      throw new Error(cancelled ? "Cancelled" : text || `Processor failed with ${response.status}`);
+    }
+
+    const after = await getJob(env.ARTIFACTS, job.id);
+    if (after?.error === "Cancelled") {
+      return;
     }
 
     const zipBytes = await response.arrayBuffer();
@@ -117,13 +174,29 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
       progress: 100,
       stripeCount: job.request.stripes,
     });
+    // Zip is the source of truth for download; keep preview JPEGs until download/TTL.
+    const completed = await getJob(env.ARTIFACTS, job.id);
+    if (completed && completed.artifactsAvailable === undefined) {
+      completed.artifactsAvailable = true;
+      await saveJob(env.ARTIFACTS, completed);
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown processing error";
+    const existing = await getJob(env.ARTIFACTS, job.id);
+    if (existing?.error === "Cancelled") {
+      return;
+    }
+    let message = error instanceof Error ? error.message : "Unknown processing error";
+    if (message === "fetch failed" || /ECONNREFUSED|Failed to fetch/i.test(message)) {
+      message =
+        "Processor unreachable — start it with npm run dev:processor (or npm run dev)";
+    }
     await updateJobProgress(env.ARTIFACTS, job.id, {
       status: "failed",
       progress: 0,
       error: message,
     });
+    // Failed jobs won't be downloaded — free preview/partial uploads.
+    await purgeJobArtifacts(env.ARTIFACTS, job.id);
   }
 }
 
@@ -147,6 +220,8 @@ app.post("/api/jobs", async (c) => {
 
   const now = new Date().toISOString();
   const stripeH = stripeHeightPx(body.diameterCm);
+  const placeName =
+    typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
   const job: JobRecord = {
     id: createJobId(),
     status: "queued",
@@ -156,7 +231,7 @@ app.post("/api/jobs", async (c) => {
     stripeWidthPx: stripeWidthPx(stripeH, body.stripes),
     createdAt: now,
     updatedAt: now,
-    request: body,
+    request: { ...body, placeName },
   };
 
   await saveJob(c.env.ARTIFACTS, job);
@@ -181,8 +256,14 @@ app.post("/api/jobs", async (c) => {
 });
 
 app.get("/api/jobs/:id", async (c) => {
-  const job = await getJob(c.env.ARTIFACTS, c.req.param("id"));
+  let job = await getJob(c.env.ARTIFACTS, c.req.param("id"));
   if (!job) return c.json({ error: "Job not found" }, 404);
+
+  job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
+
+  const hasArtifacts = job.artifactsAvailable !== false;
+  const canDownload = job.status === "complete" && hasArtifacts;
+  const downloadFilename = stripeZipFilename(job.request.placeName, job.request.diameterCm);
 
   return c.json({
     id: job.id,
@@ -195,30 +276,118 @@ app.get("/api/jobs/:id", async (c) => {
     stepCurrent: job.stepCurrent,
     stepTotal: job.stepTotal,
     stepUnit: job.stepUnit,
-    downloadUrl: job.status === "complete" ? `/api/jobs/${job.id}/download` : null,
+    queuePosition: job.queuePosition,
+    queueLength: job.queueLength,
+    files: job.files ?? [],
+    artifactsAvailable: hasArtifacts,
+    updatedAt: job.updatedAt,
+    downloadUrl: canDownload ? `/api/jobs/${job.id}/download` : null,
+    downloadFilename: canDownload ? downloadFilename : null,
+    placeName: job.request.placeName,
+    center: job.request.center,
+    sideMeters: job.request.sideMeters,
+    stripes: job.request.stripes,
+    diameterCm: job.request.diameterCm,
   });
 });
 
+app.put("/api/jobs/:id/files/:name", async (c) => {
+  const jobId = c.req.param("id");
+  const name = c.req.param("name");
+  if (!isAllowedJobFilename(name)) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+
+  const job = await getJob(c.env.ARTIFACTS, jobId);
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (job.error === "Cancelled") {
+    return c.json({ ok: true, ignored: true, abort: true });
+  }
+
+  const bytes = await c.req.arrayBuffer();
+  if (!bytes.byteLength) {
+    return c.json({ error: "Empty file body" }, 400);
+  }
+
+  await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/files/${name}`, bytes, "image/jpeg");
+  await addJobFile(c.env.ARTIFACTS, jobId, name);
+  return c.json({ ok: true, file: name });
+});
+
+app.get("/api/jobs/:id/files/:name", async (c) => {
+  const jobId = c.req.param("id");
+  const name = c.req.param("name");
+  if (!isAllowedJobFilename(name)) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+
+  const job = await getJob(c.env.ARTIFACTS, jobId);
+  if (!job) return c.json({ error: "Job not found" }, 404);
+
+  const bytes = await getArtifact(c.env.ARTIFACTS, `jobs/${jobId}/files/${name}`);
+  if (!bytes) return c.json({ error: "File not ready" }, 404);
+
+  const headers = new Headers();
+  headers.set("Content-Type", "image/jpeg");
+  // Previews may be replaced after a partial upload; never serve stale bytes.
+  headers.set("Cache-Control", "no-store");
+  return new Response(bytes, { headers });
+});
+
 app.patch("/api/jobs/:id/progress", async (c) => {
+  const jobId = c.req.param("id");
+  const existing = await getJob(c.env.ARTIFACTS, jobId);
+  if (!existing) return c.json({ error: "Job not found" }, 404);
+  // Tell the processor to stop if the client already cancelled.
+  if (existing.error === "Cancelled") {
+    return c.json({ ok: true, ignored: true, abort: true });
+  }
+
   const update = (await c.req.json()) as ProgressUpdate;
-  const job = await updateJobProgress(c.env.ARTIFACTS, c.req.param("id"), update);
+  const job = await updateJobProgress(c.env.ARTIFACTS, jobId, update);
   if (!job) return c.json({ error: "Job not found" }, 404);
   return c.json({ ok: true });
 });
 
+app.delete("/api/jobs/:id", async (c) => {
+  const job = await cancelJob(c.env, c.req.param("id"));
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  return c.json({ ok: true, status: job.status, error: job.error });
+});
+
+/** Beacon-friendly cancel (sendBeacon only supports POST). */
+app.post("/api/jobs/:id/cancel", async (c) => {
+  const job = await cancelJob(c.env, c.req.param("id"));
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  return c.json({ ok: true, status: job.status, error: job.error });
+});
+
 app.get("/api/jobs/:id/download", async (c) => {
-  const job = await getJob(c.env.ARTIFACTS, c.req.param("id"));
+  let job = await getJob(c.env.ARTIFACTS, c.req.param("id"));
   if (!job) return c.json({ error: "Job not found" }, 404);
   if (job.status !== "complete") {
     return c.json({ error: "Job not complete" }, 409);
   }
 
-  const zipBytes = await getArtifact(c.env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
-  if (!zipBytes) return c.json({ error: "Artifact missing" }, 404);
+  job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
+  if (job.artifactsAvailable === false) {
+    return c.json({ error: "Artifacts already removed" }, 410);
+  }
 
+  const zipBytes = await getArtifact(c.env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
+  if (!zipBytes) {
+    await purgeJobArtifacts(c.env.ARTIFACTS, job.id);
+    return c.json({ error: "Artifact missing" }, 404);
+  }
+
+  const filename = stripeZipFilename(job.request.placeName, job.request.diameterCm);
   const headers = new Headers();
   headers.set("Content-Type", "application/zip");
-  headers.set("Content-Disposition", `attachment; filename="globus-stripes-${job.id}.zip"`);
+  headers.set("Content-Disposition", `attachment; filename="${filename}"`);
+  // Client can refresh job status; server deletes zip + previews after the body is buffered.
+  headers.set("X-Artifacts-Purged", "1");
+
+  c.executionCtx.waitUntil(purgeJobArtifacts(c.env.ARTIFACTS, job.id));
 
   return new Response(zipBytes, { headers });
 });

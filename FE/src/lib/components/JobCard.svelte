@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { downloadUrl } from '@lib/api/jobs';
+	import { downloadJobZip } from '@lib/api/jobs';
 	import type { CreateJobResponse, JobStatus, StepUnit } from '@lib/types';
 	import { clampTileZoom } from '@shared/tile-constants';
 
@@ -44,6 +44,12 @@
 		stepCurrent?: number;
 		stepTotal?: number;
 		stepUnit?: StepUnit;
+		queuePosition?: number;
+		queueLength?: number;
+		downloadFilename?: string | null;
+		/** False after zip was downloaded or server TTL purged files. */
+		artifactsAvailable?: boolean;
+		ondownloaded?: () => void;
 	}
 
 	let {
@@ -55,8 +61,30 @@
 		error = null,
 		stepCurrent,
 		stepTotal,
-		stepUnit
+		stepUnit,
+		queuePosition,
+		queueLength,
+		downloadFilename = null,
+		artifactsAvailable = true,
+		ondownloaded
 	}: Props = $props();
+
+	let downloading = $state(false);
+	let downloadError = $state<string | null>(null);
+
+	async function onDownloadClick() {
+		if (!jobId || downloading) return;
+		downloading = true;
+		downloadError = null;
+		try {
+			await downloadJobZip(jobId, downloadFilename);
+			ondownloaded?.();
+		} catch (err) {
+			downloadError = err instanceof Error ? err.message : 'Download failed';
+		} finally {
+			downloading = false;
+		}
+	}
 
 	const processingFlow: JobStatus[] = [
 		'queued',
@@ -82,10 +110,27 @@
 		return Math.min(100, Math.round((stepCurrent / stepTotal) * 100));
 	});
 
+	const queueTag = $derived.by(() => {
+		if (status !== 'queued') return null;
+		if (queuePosition != null && queueLength != null) {
+			return `#${queuePosition} of ${queueLength}`;
+		}
+		if (queuePosition != null) {
+			return `#${queuePosition}`;
+		}
+		return null;
+	});
+
 	const stepDetail = $derived.by(() => {
 		if (!isProcessing) return null;
 
 		if (status === 'queued') {
+			if (queuePosition != null && queuePosition > 1) {
+				const ahead = queuePosition - 1;
+				return ahead === 1
+					? '1 job ahead of you in the processor queue…'
+					: `${ahead} jobs ahead of you in the processor queue…`;
+			}
 			return 'Waiting for the processor to start…';
 		}
 
@@ -127,7 +172,7 @@
 			fetching_tiles: `Rendering ${manifest.tileCount.toLocaleString()} vector tiles at zoom ${clampTileZoom(manifest.zoom)}.`,
 			stitching: `Building a ~${manifest.outputSizePx.toLocaleString()} px square map image.`,
 			projecting: `Cutting ${stripeCount} stripes for your globe.`,
-			packaging: 'Creating stripes.zip with the map and all stripe images.',
+			packaging: 'Creating the zip with the map and all stripe images.',
 			complete: 'Processing finished.',
 			failed: 'Processing stopped before completion.'
 		};
@@ -172,7 +217,19 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex flex-wrap items-center gap-2">
 				<h2 class="text-sm font-semibold text-stone-900">{statusLabels[status]}</h2>
-				{#if isProcessing}
+				{#if status === 'queued' && queueTag}
+					<span
+						class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-900 ring-1 ring-sky-200"
+					>
+						Queue {queueTag}
+					</span>
+				{:else if status === 'queued'}
+					<span
+						class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-900 ring-1 ring-sky-200"
+					>
+						Waiting
+					</span>
+				{:else if isProcessing}
 					<span
 						class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200"
 					>
@@ -188,25 +245,47 @@
 					<span
 						class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-red-200"
 					>
-						Failed
+						{error === 'Cancelled' ? 'Cancelled' : 'Failed'}
 					</span>
 				{/if}
 			</div>
 			{#if stepDetail}
 				<p class="mt-1 text-sm text-stone-700">{stepDetail}</p>
 			{/if}
-			<p class="mt-1 font-mono text-[11px] text-stone-500">{jobId ?? 'Starting…'}</p>
+			{#if status === 'queued'}
+				<p class="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-950 ring-1 ring-sky-100">
+					Keep this tab open while you are in the queue. Closing, reloading, or leaving this page
+					removes your job from the processor queue.
+				</p>
+			{/if}
+			<p class="mt-1 font-mono text-[11px] text-stone-500">
+				{#if jobId}
+					<a href="?job={jobId}" class="underline decoration-stone-300 hover:text-stone-800">
+						{jobId}
+					</a>
+				{:else}
+					Starting…
+				{/if}
+			</p>
 		</div>
 
-		{#if status === 'complete' && jobId}
-			<a
-				href={downloadUrl(jobId)}
-				class="shrink-0 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+		{#if status === 'complete' && jobId && artifactsAvailable}
+			<button
+				type="button"
+				onclick={onDownloadClick}
+				disabled={downloading}
+				class="shrink-0 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
 			>
-				Download stripes.zip
-			</a>
+				{downloading ? 'Downloading…' : `Download ${downloadFilename ?? 'zip'}`}
+			</button>
+		{:else if status === 'complete' && jobId && !artifactsAvailable}
+			<p class="shrink-0 text-sm text-stone-500">Server files removed after download.</p>
 		{/if}
 	</div>
+
+	{#if downloadError}
+		<p class="mt-2 text-sm text-red-700">{downloadError}</p>
+	{/if}
 
 	<div class="mt-3 space-y-2">
 		<div>
@@ -264,7 +343,9 @@
 							<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-700" aria-hidden="true"></span>
 						{/if}
 						{step.label}
-						{#if state === 'active' && step.status === status && stepCurrent != null && stepTotal != null}
+						{#if state === 'active' && step.status === 'queued' && queueTag}
+							<span class="text-[10px] opacity-80">{queueTag}</span>
+						{:else if state === 'active' && step.status === status && stepCurrent != null && stepTotal != null}
 							<span class="text-[10px] opacity-80">{stepCurrent}/{stepTotal}</span>
 						{/if}
 					</span>
@@ -274,6 +355,14 @@
 	{/if}
 
 	{#if error}
-		<p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">{error}</p>
+		<p
+			class="mt-3 rounded-lg px-3 py-2 text-sm ring-1 {error === 'Cancelled'
+				? 'bg-stone-100 text-stone-700 ring-stone-200'
+				: 'bg-red-50 text-red-700 ring-red-100'}"
+		>
+			{error === 'Cancelled'
+				? 'Removed from the processor queue (tab closed or cancelled).'
+				: error}
+		</p>
 	{/if}
 </div>

@@ -17,6 +17,8 @@ export interface JobRequest {
 	sideMeters: number;
 	stripes: number;
 	diameterCm: number;
+	/** Short place label for download naming (e.g. city from geocode). */
+	placeName?: string;
 	mapLayers?: MapLayerStyle;
 }
 
@@ -57,7 +59,24 @@ export interface JobResponse {
 	stepCurrent?: number;
 	stepTotal?: number;
 	stepUnit?: StepUnit;
+	/** 1-based place in the processor queue (includes the running job). */
+	queuePosition?: number;
+	/** Total jobs in the processor line (waiting + running). */
+	queueLength?: number;
+	/** Previewable JPEG filenames ready for GET /api/jobs/:id/files/:name. */
+	files?: string[];
+	/** False after download or TTL purge — zip/previews removed from the server. */
+	artifactsAvailable?: boolean;
+	/** Bumps when progress/files change — use to cache-bust preview URLs. */
+	updatedAt?: string;
 	downloadUrl?: string | null;
+	downloadFilename?: string | null;
+	/** Original request fields (for restoring UI from ?job=). */
+	placeName?: string;
+	center?: LatLng;
+	sideMeters?: number;
+	stripes?: number;
+	diameterCm?: number;
 }
 
 export interface CreateJobResponse {

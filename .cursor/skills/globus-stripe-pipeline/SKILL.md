@@ -10,8 +10,9 @@ description: Understand and modify the Globus Maker job pipeline from map select
 1. User selects center + square side on map
 2. `POST /api/estimate` → zoom, tile count, stripe dimensions
 3. `POST /api/jobs` → job queued, background `runJob()` starts
-4. Frontend polls `GET /api/jobs/:id`
-5. On complete, download via `GET /api/jobs/:id/download`
+4. Processor single-flight queue: waiters get `queued` + `queuePosition`/`queueLength`
+5. Frontend polls `GET /api/jobs/:id`; tab close → `POST /api/jobs/:id/cancel`
+6. On complete, download via `GET /api/jobs/:id/download`
 
 ## Key formulas (`BE/src/osm/tile-math.ts`)
 
@@ -30,9 +31,10 @@ description: Understand and modify the Globus Maker job pipeline from map select
 
 1. **fetching_tiles** — render vector tiles with palette
 2. **stitching** — merge into square `input.jpg`
-3. **projecting** — `slize.pl` meridian projection
-4. **packaging** — zip stripes + input.jpg
-5. API stores zip in R2, marks **complete**
+3. **prewarp** — copy → `input-distorted.jpg` (`spherical_prewarp`)
+4. **projecting** — `slize.pl` on `input-distorted.jpg`
+5. **packaging** — zip `input.jpg` + `input-distorted.jpg` + stripes
+6. API stores zip in R2, marks **complete**
 
 ## Reference test values
 

@@ -8,19 +8,41 @@ alwaysApply: false
 
 Single source of truth for map layer configuration used by FE preview and processor rendering.
 
-## Layer keys
+## Layer keys (UI toggles)
 
 `landForest`, `water`, `streets`, `buildings`, `streetNames`
+
+Grouped for the FE via `MAP_LAYER_GROUPS` (land / water / transport / settlement / labels).
+
+**Land / water:** always painted. Their `enabled` flag is mutually exclusive and selects the **base fill** color (map background + empty stripe space). Default base: land. Use `getBaseFillLayer` / `withBaseFillLayer` / `ensureBaseFill`.
+
+## Zoom bands (`OSM_ZOOM`)
+
+Developer-defined (not user-editable). Keep `container/tile_render.py` constants in sync.
+
+| Feature | Zoom |
+|---|---|
+| Built-up (`landuse`) | z10+ (`builtUpMin`; follows Buildings toggle) |
+| Buildings | z12+ |
+| Place labels | z3+ |
+| Water labels | z9+ |
+| Waterway labels | z10+ |
+| Park labels | z11+ |
+| Street labels | z13+ |
 
 ## Key exports
 
 - `DEFAULT_MAP_LAYERS` / `createDefaultMapLayers()` — UI defaults
+- `MAP_LAYER_GROUPS` / `layerZoomHint(key)` — FE controls grouping + captions
+- `OSM_STYLE_LAYERS` — typed OSM → MapLibre registry (`OsmStyleLayerDef`)
 - `buildMapStyle(layers)` — MapLibre GL style JSON (OpenFreeMap vector tiles)
 - `buildRenderPalette(layers)` — flat colors for Python tile renderer
 - `validateMapLayers(input)` — sanitize API input (hex colors, booleans)
 
 ## Rules
 
-- Add new layers to `MAP_LAYER_KEYS`, `MAP_LAYER_LABELS`, `DEFAULT_MAP_LAYERS`, both builders, and `RenderPalette`
+- Add new **UI toggles** to `MAP_LAYER_KEYS`, `MAP_LAYER_LABELS`, `DEFAULT_MAP_LAYERS`, `MAP_LAYER_GROUPS`, `RenderPalette.enabled`, and both builders
+- Add new **OSM paint layers** to `OSM_STYLE_LAYERS` with `group`, optional `minzoom`/`maxzoom`, and a `style()` builder — do not push ad-hoc layers inside `buildMapStyle`
+- Update `OSM_ZOOM` and mirror constants in `container/tile_render.py` when changing visibility bands
 - FE imports via `@shared/map-style`; BE imports via relative `../../shared/map-style`
 - Keep FE `MapLayerKey` type aligned with shared exports

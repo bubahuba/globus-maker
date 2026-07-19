@@ -13,14 +13,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     fonts-dejavu-core \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Large globes (up to ~60cm × supersample) need ~19k² px for BarrelInverse.
+    && sed -i \
+      -e 's/name="memory" value="[^"]*"/name="memory" value="8GiB"/' \
+      -e 's/name="map" value="[^"]*"/name="map" value="16GiB"/' \
+      -e 's/name="area" value="[^"]*"/name="area" value="1GP"/' \
+      -e 's/name="disk" value="[^"]*"/name="disk" value="16GiB"/' \
+      /etc/ImageMagick-7/policy.xml
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY slize.pl process.py stitch.py tile_render.py distort.py server.py ./
+COPY slize.pl process.py stitch.py tile_render.py distort.py job_queue.py server.py ./
 RUN chmod +x /app/slize.pl
 
 ENV PORT=8080

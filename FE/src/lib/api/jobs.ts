@@ -58,6 +58,44 @@ export function downloadUrl(jobId: string): string {
 	return `/api/jobs/${jobId}/download`;
 }
 
+/** Fetch zip, trigger browser save, then resolve (server purges artifacts after download). */
+export async function downloadJobZip(jobId: string, filename?: string | null): Promise<void> {
+	const response = await fetch(downloadUrl(jobId));
+	if (!response.ok) {
+		const body = (await response.json().catch(() => null)) as { error?: string } | null;
+		throw new Error(body?.error || `Download failed (${response.status})`);
+	}
+	const blob = await response.blob();
+	const objectUrl = URL.createObjectURL(blob);
+	const anchor = document.createElement('a');
+	anchor.href = objectUrl;
+	anchor.download = filename?.trim() || 'globus-stripes.zip';
+	document.body.appendChild(anchor);
+	anchor.click();
+	anchor.remove();
+	URL.revokeObjectURL(objectUrl);
+}
+
+export function jobFileUrl(jobId: string, filename: string, cacheBust?: string | number): string {
+	const base = `/api/jobs/${jobId}/files/${encodeURIComponent(filename)}`;
+	if (cacheBust == null || cacheBust === '') return base;
+	return `${base}?v=${encodeURIComponent(String(cacheBust))}`;
+}
+
+/** Cancel a queued/running job. Uses sendBeacon when possible (tab close). */
+export function cancelJob(jobId: string): void {
+	const url = `/api/jobs/${jobId}/cancel`;
+	try {
+		if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+			const ok = navigator.sendBeacon(url, new Blob(['{}'], { type: 'application/json' }));
+			if (ok) return;
+		}
+	} catch {
+		// fall through to fetch
+	}
+	void fetch(url, { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' }, keepalive: true });
+}
+
 export async function pollJob(
 	jobId: string,
 	onUpdate: (job: JobResponse) => void,

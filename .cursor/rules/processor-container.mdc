@@ -8,17 +8,25 @@ alwaysApply: false
 
 FastAPI server on `:8080`. Entry: `POST /process` with `ProcessPayload` JSON.
 
+## Queue (`job_queue.py`)
+
+Single-flight queue: only one job runs at a time; others wait.
+While waiting, callbacks report `{ status: "queued", queuePosition, queueLength }`.
+`DELETE /process/{jobId}` cancels a waiting or running job.
+
 ## Pipeline (`process.py`)
 
 1. Render vector tiles → `tile_render.py`
-2. Stitch tiles → `stitch.py` → `input.jpg`
-3. Run `slize.pl` (Perl/Panotools) → `out-*.jpg` stripes
-4. Zip `input.jpg` + stripes → return to API
+2. Stitch tiles → `stitch.py` → `input.jpg` (undistorted stitch)
+3. Spherical prewarp copy → `input-distorted.jpg` (`distort.py`)
+4. Run `slize.pl` on `input-distorted.jpg` → `out-*.jpg` stripes
+5. Zip `input.jpg` + `input-distorted.jpg` + stripes → return to API
 
 ## Progress callbacks
 
-PATCH `callbackUrl` with `{ status, progress, stepCurrent, stepTotal, stepUnit }`.
+PATCH `callbackUrl` with `{ status, progress, stepCurrent, stepTotal, stepUnit, queuePosition?, queueLength? }`.
 Statuses must match `JobStatus` in `BE/src/types.ts`.
+If the API responds with `{ abort: true }`, stop the job (client cancelled).
 
 ## Local testing
 

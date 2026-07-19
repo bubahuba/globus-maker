@@ -20,6 +20,10 @@ alwaysApply: false
 | `POST /api/jobs` | Start job (`waitUntil` for async processing) |
 | `GET /api/jobs/:id` | Poll status |
 | `PATCH /api/jobs/:id/progress` | Processor callback |
+| `DELETE /api/jobs/:id` | Cancel queued/running job |
+| `POST /api/jobs/:id/cancel` | Cancel (beacon-friendly) |
+| `PUT /api/jobs/:id/files/:name` | Processor uploads preview JPEG |
+| `GET /api/jobs/:id/files/:name` | Serve preview JPEG |
 | `GET /api/jobs/:id/download` | Download zip |
 | `GET /api/geocode?q=` | Nominatim proxy |
 
@@ -27,7 +31,8 @@ alwaysApply: false
 
 ```typescript
 // Local: PROCESSOR_URL=http://localhost:8080 → POST /process
-// Prod: env.PROCESSOR.getByName(jobId).fetch("http://processor/process", ...)
+// Prod: env.PROCESSOR.getByName("shared").fetch("http://processor/process", ...)
+// Cancel: DELETE /process/:jobId on the same shared processor
 ```
 
 Set `API_CALLBACK_ORIGIN` so Docker processor can PATCH progress (default `http://host.docker.internal:8787`).

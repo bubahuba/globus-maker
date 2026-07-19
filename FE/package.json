@@ -24,7 +24,9 @@
   },
   "dependencies": {
     "@maplibre/maplibre-gl-leaflet": "^0.1.3",
+    "@types/three": "^0.185.1",
     "leaflet": "^1.9.4",
-    "maplibre-gl": "^5.24.0"
+    "maplibre-gl": "^5.24.0",
+    "three": "^0.185.1"
   }
 }
