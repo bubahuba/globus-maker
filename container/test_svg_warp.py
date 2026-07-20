@@ -220,6 +220,54 @@ def test_stripe_projection_updates_text_rotate_center() -> None:
         assert abs(angle) > 0.5  # still angled after unwrap
 
 
+def test_stripe_keeps_land_over_basefill_with_arc_rim() -> None:
+    """Land canvas stays land-colored; baseFill is underlay; rim is arc-cut not flat."""
+    import re
+    import xml.etree.ElementTree as ET
+
+    svg = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect data-bg="1" x="0" y="0" width="200" height="200" fill="#e8eddb"/>
+  <path d="M100,100 L100,20 L120,40 L80,40 Z" fill="#333"/>
+</svg>
+"""
+    with TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.svg"
+        dest = Path(tmp) / "out.svg"
+        src.write_text(svg, encoding="utf-8")
+        project_svg_stripe(
+            src,
+            dest,
+            stripe_index=0,
+            stripes=12,
+            stripe_height=400,
+            background="#9ebfff",
+        )
+        root = ET.parse(dest).getroot()
+        bg = None
+        land = None
+        for child in root:
+            tag = child.tag.split("}")[-1]
+            if tag == "rect" and child.attrib.get("data-bg") == "1":
+                bg = child
+            if tag == "path" and child.attrib.get("data-land") == "1":
+                land = child
+        assert bg is not None
+        assert bg.attrib.get("fill") == "#9ebfff"
+        assert land is not None
+        assert land.attrib.get("fill") == "#e8eddb"
+        # Outer rim y should vary across the gore (arc), not a single horizontal line.
+        ys = [float(y) for y in re.findall(r"[, ]([\d.]+)(?=L|Z|$)", land.attrib["d"])]
+        # Parse more reliably from path points
+        from svg_warp import _parse_path_points
+
+        pts = _parse_path_points(land.attrib["d"])
+        assert len(pts) >= 8
+        rim = pts[1:]  # skip centre
+        rim_ys = [p[1] for p in rim]
+        assert max(rim_ys) - min(rim_ys) > 2.0  # curved bottom, not a flat cut
+
+
 if __name__ == "__main__":
     test_barrel_inverse_center_fixed()
     test_barrel_inverse_pulls_inward()
@@ -231,4 +279,5 @@ if __name__ == "__main__":
     test_stripe_svg_fills_viewbox_not_lentil()
     test_warp_svg_barrel_rewrites_path()
     test_stripe_projection_updates_text_rotate_center()
+    test_stripe_keeps_land_over_basefill_with_arc_rim()
     print("ok")

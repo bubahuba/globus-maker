@@ -1,4 +1,4 @@
-import type { LatLng, TileCoord, TileManifest } from "../types";
+import type { JobMode, JobRequest, LatLng, TileCoord, TileManifest } from "../types";
 import {
   MAX_SIDE_METERS,
   REF_SIDE_METERS,
@@ -8,9 +8,19 @@ import {
 
 const TILE_SIZE = 256;
 const TARGET_PX = 4500;
+/** Cap on native tile-cover size when picking zoom (not map export max). */
 const MAX_PX = 6000;
+const MIN_SQUARE_SIDE_PX = 500;
+/** Map-mode square export edge max (may upscale beyond native tile size). */
+const MAX_SQUARE_SIDE_PX = 10000;
 const MAX_TILE_COUNT = 400;
 const METERS_PER_DEG_LAT = 111_320;
+
+export { MIN_SQUARE_SIDE_PX, MAX_SQUARE_SIDE_PX };
+
+export function normalizeJobMode(mode: unknown): JobMode {
+  return mode === "map" ? "map" : "globe";
+}
 
 export function stripeHeightPx(diameterCm: number): number {
   return Math.round(diameterCm * 160);
@@ -134,10 +144,27 @@ export function pickZoom(
   return clampTileZoom(bestZoom);
 }
 
+/** Resolve the pixel target used for zoom + manifest (map squareSidePx or globe stripe height). */
+export function resolveTargetOutputPx(input: {
+  mode?: JobMode | string;
+  squareSidePx?: number;
+  diameterCm?: number;
+}): number {
+  const mode = normalizeJobMode(input.mode);
+  if (mode === "map") {
+    const px = Number(input.squareSidePx);
+    if (Number.isFinite(px)) return Math.round(px);
+    return TARGET_PX;
+  }
+  const diameter = Number(input.diameterCm);
+  if (Number.isFinite(diameter)) return stripeHeightPx(diameter);
+  return TARGET_PX;
+}
+
 export function buildTileManifest(
   center: LatLng,
   sideMeters: number,
-  options?: { zoom?: number; diameterCm?: number },
+  options?: { zoom?: number; diameterCm?: number; targetOutputPx?: number },
 ): TileManifest {
   if (sideMeters <= 0 || sideMeters > MAX_SIDE_METERS) {
     throw new Error(`sideMeters must be between 1 and ${MAX_SIDE_METERS}`);
@@ -145,7 +172,11 @@ export function buildTileManifest(
 
   const bounds = squareBounds(center, sideMeters);
   const targetPx =
-    options?.diameterCm != null ? stripeHeightPx(options.diameterCm) : TARGET_PX;
+    options?.targetOutputPx != null
+      ? options.targetOutputPx
+      : options?.diameterCm != null
+        ? stripeHeightPx(options.diameterCm)
+        : TARGET_PX;
   const zoom = clampTileZoom(options?.zoom ?? pickZoom(bounds, targetPx, sideMeters));
   const xMin = lngToPixelX(bounds.west, zoom);
   const xMax = lngToPixelX(bounds.east, zoom);
@@ -199,18 +230,21 @@ export function buildTileManifest(
   };
 }
 
-export function resolveZoom(center: LatLng, sideMeters: number, diameterCm: number): number {
+export function resolveZoom(center: LatLng, sideMeters: number, targetPx: number): number {
   const bounds = squareBounds(center, sideMeters);
-  return pickZoom(bounds, stripeHeightPx(diameterCm), sideMeters);
+  return pickZoom(bounds, targetPx, sideMeters);
 }
 
-export function validateJobInput(input: {
-  center: LatLng;
-  sideMeters: number;
-  stripes: number;
-  diameterCm: number;
-  outputFormat?: string;
-}): string | null {
+/** @deprecated Prefer resolveZoom(center, sideMeters, targetPx). Kept for call sites using diameter. */
+export function resolveZoomFromDiameter(
+  center: LatLng,
+  sideMeters: number,
+  diameterCm: number,
+): number {
+  return resolveZoom(center, sideMeters, stripeHeightPx(diameterCm));
+}
+
+export function validateJobInput(input: JobRequest): string | null {
   if (!Number.isFinite(input.center.lat) || input.center.lat < -85 || input.center.lat > 85) {
     return "Invalid latitude";
   }
@@ -220,12 +254,12 @@ export function validateJobInput(input: {
   if (!Number.isFinite(input.sideMeters) || input.sideMeters < 100 || input.sideMeters > MAX_SIDE_METERS) {
     return `sideMeters must be between 100 and ${MAX_SIDE_METERS}`;
   }
-  if (!Number.isInteger(input.stripes) || input.stripes < 4 || input.stripes > 36) {
-    return "stripes must be an integer between 4 and 36";
+
+  const mode = normalizeJobMode(input.mode);
+  if (input.mode != null && input.mode !== "map" && input.mode !== "globe") {
+    return "mode must be map or globe";
   }
-  if (!Number.isFinite(input.diameterCm) || input.diameterCm < 10 || input.diameterCm > 60) {
-    return "diameterCm must be between 10 and 60";
-  }
+
   if (
     input.outputFormat != null &&
     input.outputFormat !== "jpg" &&
@@ -233,8 +267,38 @@ export function validateJobInput(input: {
   ) {
     return "outputFormat must be jpg or svg";
   }
+
+  if (mode === "map") {
+    const squareSidePx = Math.round(Number(input.squareSidePx));
+    if (
+      !Number.isFinite(squareSidePx) ||
+      squareSidePx < MIN_SQUARE_SIDE_PX ||
+      squareSidePx > MAX_SQUARE_SIDE_PX
+    ) {
+      return `squareSidePx must be an integer between ${MIN_SQUARE_SIDE_PX} and ${MAX_SQUARE_SIDE_PX}`;
+    }
+    try {
+      buildTileManifest(input.center, input.sideMeters, { targetOutputPx: squareSidePx });
+    } catch (error) {
+      return error instanceof Error ? error.message : "Invalid map selection";
+    }
+    return null;
+  }
+
+  // Globe mode — coerce HTML/JSON number inputs (may arrive as strings).
+  const stripes = Math.round(Number(input.stripes));
+  if (!Number.isFinite(stripes) || stripes < 4 || stripes > 36) {
+    return "stripes must be an integer between 4 and 36";
+  }
+  const diameterCm = Number(input.diameterCm);
+  if (!Number.isFinite(diameterCm) || diameterCm < 10 || diameterCm > 60) {
+    return "diameterCm must be between 10 and 60";
+  }
+  if (input.outputFormat === "svg") {
+    return "Globe mode only supports JPEG stripe output";
+  }
   try {
-    buildTileManifest(input.center, input.sideMeters, { diameterCm: input.diameterCm });
+    buildTileManifest(input.center, input.sideMeters, { diameterCm });
   } catch (error) {
     return error instanceof Error ? error.message : "Invalid map selection";
   }

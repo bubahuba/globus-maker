@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { downloadJobZip } from '@lib/api/jobs';
-	import type { CreateJobResponse, JobStatus, StepUnit } from '@lib/types';
+	import type { CreateJobResponse, JobMode, JobStatus, StepUnit } from '@lib/types';
 	import { clampTileZoom } from '@shared/tile-constants';
 
 	type Manifest = CreateJobResponse['manifest'];
@@ -39,6 +39,7 @@
 		status: JobStatus;
 		progress: number;
 		manifest: Manifest;
+		mode?: JobMode;
 		stripeCount: number;
 		error?: string | null;
 		stepCurrent?: number;
@@ -57,6 +58,7 @@
 		status,
 		progress,
 		manifest,
+		mode = 'globe',
 		stripeCount,
 		error = null,
 		stepCurrent,
@@ -86,22 +88,28 @@
 		}
 	}
 
-	const processingFlow: JobStatus[] = [
-		'queued',
-		'fetching_tiles',
-		'stitching',
-		'projecting',
-		'packaging',
-		'complete'
-	];
+	const processingFlow = $derived.by((): JobStatus[] =>
+		mode === 'map'
+			? ['queued', 'fetching_tiles', 'stitching', 'packaging', 'complete']
+			: ['queued', 'fetching_tiles', 'stitching', 'projecting', 'packaging', 'complete']
+	);
 
-	const steps: ProcessingStep[] = [
-		{ status: 'queued', label: 'Queued' },
-		{ status: 'fetching_tiles', label: 'Tiles' },
-		{ status: 'stitching', label: 'Stitch' },
-		{ status: 'projecting', label: 'Stripes' },
-		{ status: 'packaging', label: 'Package' }
-	];
+	const steps = $derived.by((): ProcessingStep[] =>
+		mode === 'map'
+			? [
+					{ status: 'queued', label: 'Queued' },
+					{ status: 'fetching_tiles', label: 'Tiles' },
+					{ status: 'stitching', label: 'Stitch' },
+					{ status: 'packaging', label: 'Package' }
+				]
+			: [
+					{ status: 'queued', label: 'Queued' },
+					{ status: 'fetching_tiles', label: 'Tiles' },
+					{ status: 'stitching', label: 'Stitch' },
+					{ status: 'projecting', label: 'Stripes' },
+					{ status: 'packaging', label: 'Package' }
+				]
+	);
 
 	const isProcessing = $derived(status !== 'complete' && status !== 'failed');
 
@@ -172,7 +180,10 @@
 			fetching_tiles: `Rendering ${manifest.tileCount.toLocaleString()} vector tiles at zoom ${clampTileZoom(manifest.zoom)}.`,
 			stitching: `Building a ~${manifest.outputSizePx.toLocaleString()} px square map image.`,
 			projecting: `Cutting ${stripeCount} stripes for your globe.`,
-			packaging: 'Creating the zip with the map and all stripe images.',
+			packaging:
+				mode === 'map'
+					? 'Creating the zip with your map image.'
+					: 'Creating the zip with the map and all stripe images.',
 			complete: 'Processing finished.',
 			failed: 'Processing stopped before completion.'
 		};
@@ -184,7 +195,7 @@
 			const failedAt =
 				progress >= 85
 					? 'packaging'
-					: progress >= 60
+					: mode === 'globe' && progress >= 60
 						? 'projecting'
 						: progress >= 50
 							? 'stitching'
@@ -199,7 +210,10 @@
 		}
 
 		const currentStatus = status === 'complete' ? 'complete' : status;
-		const currentIdx = processingFlow.indexOf(currentStatus);
+		// Map jobs skip projecting; treat it as stitching if it ever appears.
+		const normalized =
+			mode === 'map' && currentStatus === 'projecting' ? 'stitching' : currentStatus;
+		const currentIdx = processingFlow.indexOf(normalized);
 		const stepIdx = processingFlow.indexOf(stepStatus);
 
 		if (stepIdx < currentIdx) return 'done';

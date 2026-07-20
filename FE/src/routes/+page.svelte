@@ -12,6 +12,7 @@
 	import type {
 		CreateJobResponse,
 		EstimateResponse,
+		JobMode,
 		JobRequest,
 		JobResponse,
 		JobStatus,
@@ -20,9 +21,12 @@
 		StepUnit
 	} from '@lib/types';
 	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
-	import { clampTileZoom, INPUT_SUPERSAMPLE, MAX_SIDE_METERS } from '@shared/tile-constants';
+	import { clampTileZoom, MAX_SIDE_METERS } from '@shared/tile-constants';
 
 	const MIN_SIDE_METERS = 500;
+	const MIN_SQUARE_SIDE_PX = 500;
+	const MAX_SQUARE_SIDE_PX = 10000;
+	const DEFAULT_SQUARE_SIDE_PX = 4000;
 
 	function sideToSlider(meters: number): number {
 		return (100 * Math.log(meters / MIN_SIDE_METERS)) / Math.log(MAX_SIDE_METERS / MIN_SIDE_METERS);
@@ -41,9 +45,25 @@
 		return `${meters.toLocaleString()} m`;
 	}
 
+	function roundCm1(value: number): number {
+		return Math.round(Number(value) * 10) / 10;
+	}
+
+	function circumferenceFromDiameter(diameter: number): number {
+		return roundCm1(Number(diameter) * Math.PI);
+	}
+
+	function diameterFromCircumference(circumference: number): number {
+		const next = roundCm1(Number(circumference) / Math.PI);
+		if (!Number.isFinite(next)) return diameterCm;
+		return Math.min(60, Math.max(10, next));
+	}
+
 	let center = $state<LatLng | null>(null);
 	let placeName = $state<string | null>(null);
 	let sideMeters = $state(2500);
+	let mode = $state<JobMode>('globe');
+	let squareSidePx = $state(DEFAULT_SQUARE_SIDE_PX);
 	let stripes = $state(12);
 	let diameterCm = $state(25);
 	let outputFormat = $state<OutputFormat>('jpg');
@@ -106,14 +126,26 @@
 		if (job.downloadFilename) downloadFilename = job.downloadFilename;
 		else if (job.status === 'complete' && !artifactsAvailable) downloadFilename = null;
 
+		if (job.mode === 'map' || job.mode === 'globe') mode = job.mode;
+		if (job.squareSidePx != null) squareSidePx = job.squareSidePx;
 		if (job.stripeCount != null) stripes = job.stripeCount;
+		if (job.stripes != null) stripes = job.stripes;
 		if (job.diameterCm != null) diameterCm = job.diameterCm;
 		if (job.outputFormat === 'jpg' || job.outputFormat === 'svg') outputFormat = job.outputFormat;
 		if (job.sideMeters != null) sideMeters = job.sideMeters;
 		if (job.center) center = job.center;
 		if (job.placeName) placeName = job.placeName;
 
-		if (job.stripeHeightPx != null && job.stripeWidthPx != null) {
+		if (job.mode === 'map') {
+			jobManifest = {
+				zoom: estimate?.zoom ?? 14,
+				tileCount: estimate?.tileCount ?? 0,
+				outputSizePx:
+					estimate?.targetOutputPx ?? job.squareSidePx ?? DEFAULT_SQUARE_SIDE_PX,
+				stripeHeightPx: 0,
+				stripeWidthPx: 0
+			};
+		} else if (job.stripeHeightPx != null && job.stripeWidthPx != null) {
 			jobManifest = {
 				zoom: estimate?.zoom ?? 14,
 				tileCount: estimate?.tileCount ?? 0,
@@ -184,8 +216,8 @@
 			zoom: clampTileZoom(estimate.zoom),
 			tileCount: estimate.tileCount,
 			outputSizePx: estimate.targetOutputPx,
-			stripeHeightPx: estimate.stripeHeightPx,
-			stripeWidthPx: estimate.stripeWidthPx
+			stripeHeightPx: mode === 'globe' ? estimate.stripeHeightPx : 0,
+			stripeWidthPx: mode === 'globe' ? estimate.stripeWidthPx : 0
 		};
 	}
 
@@ -233,14 +265,25 @@
 	}
 
 	function currentRequest(): JobRequest {
-		return {
+		const base: JobRequest = {
 			center: center!,
 			sideMeters,
-			stripes,
-			diameterCm,
-			outputFormat,
+			mode,
 			...(placeName ? { placeName } : {}),
 			mapLayers
+		};
+		if (mode === 'map') {
+			return {
+				...base,
+				squareSidePx: Math.round(Number(squareSidePx)),
+				outputFormat
+			};
+		}
+		return {
+			...base,
+			stripes: Math.round(Number(stripes)),
+			diameterCm: roundCm1(diameterCm),
+			outputFormat: 'jpg'
 		};
 	}
 
@@ -257,8 +300,13 @@
 		center?.lat;
 		center?.lng;
 		sideMeters;
-		stripes;
-		diameterCm;
+		mode;
+		if (mode === 'map') {
+			squareSidePx;
+		} else {
+			stripes;
+			diameterCm;
+		}
 		scheduleEstimate();
 	});
 
@@ -351,10 +399,10 @@
 <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8">
 	<header class="space-y-2">
 		<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Globus Maker</p>
-		<h1 class="text-3xl font-semibold text-stone-900">Map a region, print globe stripes</h1>
+		<h1 class="text-3xl font-semibold text-stone-900">Map a region, or print globe stripes</h1>
 		<p class="max-w-2xl text-stone-600">
-			Search for any place or click the map to choose a square region, then download meridian strips
-			for your globe.
+			Search for any place or click the map to choose a square region. Export a square map, or
+			generate meridian stripes for your globe.
 		</p>
 	</header>
 
@@ -371,7 +419,8 @@
 					status={jobStatus}
 					progress={jobProgress}
 					manifest={jobManifest}
-					stripeCount={stripes}
+					{mode}
+					stripeCount={mode === 'globe' ? stripes : 0}
 					error={jobError}
 					stepCurrent={jobStepCurrent}
 					stepTotal={jobStepTotal}
@@ -397,10 +446,44 @@
 			</div>
 
 			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
-				<h2 class="mb-4 text-lg font-medium text-stone-900">Globe settings</h2>
+				<h2 class="mb-4 text-lg font-medium text-stone-900">Settings</h2>
+
+				<fieldset class="mb-4 space-y-2">
+					<legend class="text-sm text-stone-600">Mode</legend>
+					<div class="grid grid-cols-2 gap-2">
+						<label class="cursor-pointer">
+							<input
+								type="radio"
+								name="jobMode"
+								value="map"
+								bind:group={mode}
+								class="peer sr-only"
+							/>
+							<span
+								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+							>
+								Map
+							</span>
+						</label>
+						<label class="cursor-pointer">
+							<input
+								type="radio"
+								name="jobMode"
+								value="globe"
+								bind:group={mode}
+								class="peer sr-only"
+							/>
+							<span
+								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+							>
+								Globe
+							</span>
+						</label>
+					</div>
+				</fieldset>
 
 				<label class="mb-4 block space-y-2">
-					<span class="text-sm text-stone-600">Square side</span>
+					<span class="text-sm text-stone-600">Square side map</span>
 					<input
 						type="range"
 						min="0"
@@ -418,62 +501,102 @@
 					</span>
 				</label>
 
-				<label class="mb-4 block space-y-2">
-					<span class="text-sm text-stone-600">Stripes</span>
-					<input
-						type="number"
-						min="4"
-						max="36"
-						bind:value={stripes}
-						class="w-full rounded-lg border border-stone-300 px-3 py-2"
-					/>
-				</label>
+				{#if mode === 'map'}
+					<label class="mb-4 block space-y-2">
+						<span class="text-sm text-stone-600">Square side output</span>
+						<input
+							type="range"
+							min={MIN_SQUARE_SIDE_PX}
+							max={MAX_SQUARE_SIDE_PX}
+							step="100"
+							bind:value={squareSidePx}
+							class="w-full accent-amber-700"
+						/>
+						<span class="text-sm font-medium text-stone-800"
+							>{Math.round(Number(squareSidePx)).toLocaleString()} px</span
+						>
+						<span class="block text-xs text-stone-400">
+							{MIN_SQUARE_SIDE_PX.toLocaleString()} – {MAX_SQUARE_SIDE_PX.toLocaleString()} px
+						</span>
+					</label>
 
-				<label class="mb-4 block space-y-2">
-					<span class="text-sm text-stone-600">Globe diameter (cm)</span>
-					<input
-						type="number"
-						min="10"
-						max="60"
-						step="1"
-						bind:value={diameterCm}
-						class="w-full rounded-lg border border-stone-300 px-3 py-2"
-					/>
-				</label>
+					<fieldset class="mb-4 space-y-2">
+						<legend class="text-sm text-stone-600">Output format</legend>
+						<div class="grid grid-cols-2 gap-2">
+							<label class="cursor-pointer">
+								<input
+									type="radio"
+									name="outputFormat"
+									value="jpg"
+									bind:group={outputFormat}
+									class="peer sr-only"
+								/>
+								<span
+									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								>
+									JPEG
+								</span>
+							</label>
+							<label class="cursor-pointer">
+								<input
+									type="radio"
+									name="outputFormat"
+									value="svg"
+									bind:group={outputFormat}
+									class="peer sr-only"
+								/>
+								<span
+									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								>
+									SVG
+								</span>
+							</label>
+						</div>
+					</fieldset>
+				{:else}
+					<label class="mb-4 block space-y-2">
+						<span class="text-sm text-stone-600">Stripes</span>
+						<input
+							type="number"
+							min="4"
+							max="36"
+							bind:value={stripes}
+							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+						/>
+					</label>
 
-				<fieldset class="mb-4 space-y-2">
-					<legend class="text-sm text-stone-600">Output format</legend>
-					<div class="grid grid-cols-2 gap-2">
-						<label class="cursor-pointer">
-							<input
-								type="radio"
-								name="outputFormat"
-								value="jpg"
-								bind:group={outputFormat}
-								class="peer sr-only"
-							/>
-							<span
-								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
-							>
-								JPEG
-							</span>
-						</label>
-						<label class="cursor-pointer">
-							<input
-								type="radio"
-								name="outputFormat"
-								value="svg"
-								bind:group={outputFormat}
-								class="peer sr-only"
-							/>
-							<span
-								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
-							>
-								SVG
-							</span>
-						</label>
-					</div>
-				</fieldset>
+					<label class="mb-4 block space-y-2">
+						<span class="text-sm text-stone-600">Globe diameter (cm)</span>
+						<input
+							type="number"
+							min="10"
+							max="60"
+							step="0.1"
+							bind:value={diameterCm}
+							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+						/>
+					</label>
+
+					<label class="mb-4 block space-y-2">
+						<span class="text-sm text-stone-600">Circumference (cm)</span>
+						<input
+							type="number"
+							min={circumferenceFromDiameter(10)}
+							max={circumferenceFromDiameter(60)}
+							step="0.1"
+							value={circumferenceFromDiameter(diameterCm)}
+							oninput={(event) => {
+								diameterCm = diameterFromCircumference(
+									Number(event.currentTarget.value)
+								);
+							}}
+							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+						/>
+						<span class="block text-xs text-stone-400">
+							π × diameter — informational; editing updates diameter
+						</span>
+					</label>
+				{/if}
 
 				<button
 					type="button"
@@ -481,14 +604,22 @@
 					disabled={submitting || !!estimateError || !center}
 					class="w-full rounded-xl bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-900 disabled:cursor-not-allowed disabled:bg-stone-300"
 				>
-					{submitting ? 'Generating…' : center ? 'Generate globe stripes' : 'Select a place first'}
+					{#if submitting}
+						Generating…
+					{:else if !center}
+						Select a place first
+					{:else if mode === 'map'}
+						Generate map
+					{:else}
+						Generate globe stripes
+					{/if}
 				</button>
 			</div>
 
 			<div class="rounded-2xl bg-stone-900 p-5 text-stone-100 shadow-sm">
 				<h2 class="mb-3 text-lg font-medium">Preview</h2>
 				{#if !center}
-					<p class="text-sm text-stone-400">Choose a location to see tile and stripe estimates.</p>
+					<p class="text-sm text-stone-400">Choose a location to see tile estimates.</p>
 				{:else if estimateError}
 					<p class="text-sm text-red-300">{estimateError}</p>
 				{:else if estimateLoading && !estimate}
@@ -509,12 +640,19 @@
 						</div>
 						<div class="flex justify-between gap-4">
 							<dt class="text-stone-400">Map image</dt>
-							<dd>~{estimate.targetOutputPx * INPUT_SUPERSAMPLE}px square</dd>
+							<dd>
+								~{(mode === 'map'
+									? Math.round(Number(squareSidePx))
+									: estimate.targetOutputPx
+								).toLocaleString()}px square
+							</dd>
 						</div>
-						<div class="flex justify-between gap-4">
-							<dt class="text-stone-400">Stripe size</dt>
-							<dd>{estimate.stripeWidthPx} × {estimate.stripeHeightPx} px</dd>
-						</div>
+						{#if mode === 'globe'}
+							<div class="flex justify-between gap-4">
+								<dt class="text-stone-400">Stripe size</dt>
+								<dd>{estimate.stripeWidthPx} × {estimate.stripeHeightPx} px</dd>
+							</div>
+						{/if}
 					</dl>
 				{:else}
 					<p class="text-sm text-stone-400">Calculating…</p>
@@ -527,7 +665,8 @@
 		<JobOutputs
 			jobId={jobId}
 			files={jobFiles}
-			stripeCount={stripes}
+			{mode}
+			stripeCount={mode === 'globe' ? stripes : 0}
 			status={jobStatus}
 			revision={jobUpdatedAt}
 			{artifactsAvailable}

@@ -1,14 +1,19 @@
 ---
 name: globus-stripe-pipeline
-description: Understand and modify the Globus Maker job pipeline from map selection to stripe zip download. Use when changing job flow, tile math, stripe dimensions, processor integration, or map rendering.
+description: Understand and modify the Globus Maker job pipeline from map selection to map/stripe zip download. Use when changing job flow, tile math, stripe dimensions, processor integration, or map rendering.
 ---
 
-# Stripe Generation Pipeline
+# Map / Globe Generation Pipeline
+
+## Modes
+
+- **map** — square map only (`input.svg` or rasterized `input.jpg`); no prewarp/stripes
+- **globe** — SVG stitch + prewarp, then JPEG stripes via `slize.pl` (no SVG stripe option)
 
 ## User flow
 
-1. User selects center + square side on map
-2. `POST /api/estimate` → zoom, tile count, stripe dimensions
+1. User selects center + square side (meters); Map also sets `squareSidePx`, Globe sets diameter/stripes
+2. `POST /api/estimate` → zoom, tile count, dimensions
 3. `POST /api/jobs` → job queued, background `runJob()` starts
 4. Processor single-flight queue: waiters get `queued` + `queuePosition`/`queueLength`
 5. Frontend polls `GET /api/jobs/:id`; tab close → `POST /api/jobs/:id/cancel`
@@ -18,23 +23,24 @@ description: Understand and modify the Globus Maker job pipeline from map select
 
 - Stripe height: `diameterCm × 160` px (25 cm → 4000 px)
 - Stripe width: `round(2 × 0.09 × (12/stripes) × stripeHeightPx)` (12 stripes @ 4000px → 720 px)
-- Auto zoom targets ~4500 px output, max 400 tiles, max 6000 px
+- Map target: `squareSidePx` (500–10000); auto zoom targets that size, max 400 tiles, native cover capped ~6000 px
 
 ## Processor payload (`ProcessPayload`)
 
 ```typescript
-{ jobId, callbackUrl, manifest, stripes, diameterCm, stripeHeightPx,
-  mapLayers, mapStyle, renderPalette }
+{ jobId, callbackUrl, manifest, mode, stripes, diameterCm, stripeHeightPx,
+  outputFormat, mapLayers, mapStyle, renderPalette }
 ```
 
 ## Processor steps
 
 1. **fetching_tiles** — MVT → square `input.svg` (`svg_map.py`)
-2. **stitching** — upload stitched SVG (crop/pad already in SVG build)
-3. **prewarp** — geometric BarrelInverse → `input-distorted.svg` (`svg_warp.py`)
-4. **projecting** — stereographic→TM → `out-*.svg`; DePolar JPEG preview for globe
-5. **packaging** — zip SVGs (`input.svg`, `input-distorted.svg`, stripes)
-6. API stores zip in R2, marks **complete**
+2. **stitching** — upload stitched SVG
+3. **Map** — optional SVG→JPEG; **packaging** zip; done (skip projecting)
+4. **Globe prewarp** — BarrelInverse → `input-distorted.svg`; rasterize → `input-distorted.jpg`
+5. **projecting** — `slize.pl` → `out-*.jpg`; DePolar JPEG sphere preview
+6. **packaging** — zip `input.svg` + `input-distorted.svg` + stripe JPGs
+7. API stores zip in R2, marks **complete**
 
 ## Reference test values
 
@@ -50,6 +56,6 @@ Run `npm test` after tile-math changes.
 |--------|-------|
 | Input validation | `validateJobInput()` in tile-math, API handlers |
 | Zoom/tile limits | `BE/src/osm/tile-math.ts` |
-| Map appearance | `shared/map-style.ts`, `container/tile_render.py` |
-| Stripe geometry | `container/svg_warp.py`, `process.py` |
+| Map appearance | `shared/map-style.ts`, `container/svg_map.py` |
+| Stripe geometry | `container/slize.pl`, `process.py` |
 | Job storage | `BE/src/jobs/store.ts`, `artifacts.ts` |

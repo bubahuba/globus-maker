@@ -37,6 +37,13 @@ alwaysApply: false
 
 Set `API_CALLBACK_ORIGIN` so Docker processor can PATCH progress (default `http://host.docker.internal:8787`).
 
+## Job modes
+
+- `mode: "map" | "globe"` (default/legacy: globe)
+- Map: `squareSidePx` + `outputFormat` jpg|svg; no stripes/diameter required
+- Globe: `stripes` + `diameterCm`; `outputFormat` forced to jpg
+- Download names: globe `{place}-{cm}cm.zip`, map `{place}-{px}px.zip`
+
 ## Adding API fields
 
 1. Update `BE/src/types.ts` and `FE/src/lib/types.ts`

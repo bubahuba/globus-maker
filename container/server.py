@@ -76,11 +76,12 @@ async def process(payload: dict) -> Response:
         zip_path = await processor_queue.run(job_id, work, on_queue_update=on_queue_update)
         place = str(payload.get("placeName") or "globus").strip() or "globus"
         safe = "".join(ch if ch.isalnum() else "-" for ch in place).strip("-")[:60] or "globus"
-        diameter = int(round(float(payload.get("diameterCm") or 0)))
+        diameter = round(float(payload.get("diameterCm") or 0), 1)
+        diameter_label = str(int(diameter)) if diameter == int(diameter) else f"{diameter:.1f}"
         return FileResponse(
             zip_path,
             media_type="application/zip",
-            filename=f"{safe}-{diameter}cm.zip",
+            filename=f"{safe}-{diameter_label}cm.zip",
             # Wipe work dir after the zip has been fully sent to the API.
             background=BackgroundTask(cleanup_job_workdir, WORK_ROOT, job_id),
         )

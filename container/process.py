@@ -12,13 +12,11 @@ from distort import (
     SPHERE_PREVIEW_MAX_EDGE,
     build_depolar_sphere_preview,
     rasterize_svg,
-    spherical_prewarp,
 )
 from job_queue import JobCancelled
-from stitch import stitch_tiles
 from svg_map import render_svg_map
-from svg_warp import project_all_stripes, warp_svg_barrel
-from tile_render import INPUT_SUPERSAMPLE, fetch_manifest, render_tiles, resolve_render_palette
+from svg_warp import warp_svg_barrel
+from tile_render import resolve_render_palette
 
 SPHERE_PREVIEW_NAME = "input-distorted-preview.jpg"
 INPUT_SVG = "input.svg"
@@ -294,18 +292,16 @@ def _finish_workdir(work_dir: Path) -> None:
             path.unlink(missing_ok=True)
 
 
-async def _process_job_svg(
+async def _render_input_svg(
     payload: dict,
     work_dir: Path,
     *,
     callback_url: str | None,
     cancel_event: asyncio.Event | None,
-    schedule_progress: Callable[[dict], None],
-) -> Path:
+) -> tuple[Path, dict]:
+    """Fetch MVT tiles and build the square SVG map. Returns (input_svg, render_palette)."""
     manifest = payload["manifest"]
     render_palette = resolve_render_palette(payload)
-    stripes = int(payload["stripes"])
-    stripe_height_px = int(payload["stripeHeightPx"])
 
     _ensure_not_cancelled(cancel_event)
     await report_progress(
@@ -334,8 +330,6 @@ async def _process_job_svg(
         )
 
     input_svg = work_dir / INPUT_SVG
-    input_distorted = work_dir / INPUT_DISTORTED_SVG
-
     await render_svg_map(
         manifest,
         render_palette,
@@ -355,88 +349,42 @@ async def _process_job_svg(
         },
     )
     await upload_job_file(callback_url, input_svg)
+    return input_svg, render_palette
 
+
+def _base_fill(render_palette: dict) -> str:
     land_color = render_palette.get("land") or "#e8eddb"
-    base_fill = (
+    return (
         render_palette.get("baseFill")
         or render_palette.get("background")
         or land_color
     )
 
-    _ensure_not_cancelled(cancel_event)
-    await asyncio.to_thread(warp_svg_barrel, input_svg, input_distorted)
-    await upload_job_file(callback_url, input_distorted)
 
-    # Globe texture from continuous DePolar unwrap (better poles than gore montage).
-    await upload_sphere_preview_from_map(
-        callback_url,
-        work_dir,
-        input_distorted,
-        background_color=base_fill,
-    )
-
-    _ensure_not_cancelled(cancel_event)
-    await report_progress(
-        callback_url,
-        {
-            "status": "projecting",
-            "progress": 60,
-            "stepCurrent": 0,
-            "stepTotal": stripes,
-            "stepUnit": "stripe",
-        },
-    )
-
-    async def on_stripe_progress(current: int, total: int) -> None:
-        progress = 60 + round(25 * current / total) if total else 60
-        await report_progress(
-            callback_url,
-            {
-                "status": "projecting",
-                "progress": progress,
-                "stepCurrent": current,
-                "stepTotal": total,
-                "stepUnit": "stripe",
-            },
-        )
-
-    stripe_files = await asyncio.to_thread(
-        project_all_stripes,
-        input_distorted,
-        work_dir,
-        stripes=stripes,
-        stripe_height=float(stripe_height_px),
-        background=base_fill,
-    )
-    for index, path in enumerate(stripe_files, start=1):
-        _ensure_not_cancelled(cancel_event)
-        await upload_job_file(callback_url, path)
-        await on_stripe_progress(index, stripes)
-
-    await report_progress(
-        callback_url,
-        {
-            "status": "projecting",
-            "progress": 85,
-            "stepCurrent": len(stripe_files),
-            "stepTotal": stripes,
-            "stepUnit": "stripe",
-        },
-    )
-
+async def _package_and_finish(
+    work_dir: Path,
+    stripe_files: list[Path],
+    extras: tuple[str, ...],
+    *,
+    callback_url: str | None,
+    schedule_progress: Callable[[dict], None],
+    cancel_event: asyncio.Event | None,
+    stripe_count: int = 0,
+    packaging_start: int = 85,
+) -> Path:
     _ensure_not_cancelled(cancel_event)
     zip_path = work_dir / "stripes.zip"
-    extras = (INPUT_SVG, INPUT_DISTORTED_SVG)
     file_total = len(stripe_files) + sum(
         1 for name in extras if (work_dir / name).exists()
     )
 
     def on_file_progress(current: int, total: int) -> None:
-        progress = 85 + round(15 * current / total)
+        span = 100 - packaging_start
+        progress = packaging_start + round(span * current / total) if total else packaging_start
         schedule_progress(
             {
                 "status": "packaging",
-                "progress": progress,
+                "progress": min(progress, 99),
                 "stepCurrent": current,
                 "stepTotal": total,
                 "stepUnit": "file",
@@ -447,9 +395,9 @@ async def _process_job_svg(
         callback_url,
         {
             "status": "packaging",
-            "progress": 85,
+            "progress": packaging_start,
             "stepCurrent": 0,
-            "stepTotal": file_total,
+            "stepTotal": max(file_total, 1),
             "stepUnit": "file",
         },
     )
@@ -467,13 +415,64 @@ async def _process_job_svg(
         {
             "status": "complete",
             "progress": 100,
-            "stripeCount": stripes,
+            "stripeCount": stripe_count,
         },
     )
     return zip_path
 
 
-async def _process_job_jpg(
+async def _process_job_map(
+    payload: dict,
+    work_dir: Path,
+    *,
+    callback_url: str | None,
+    cancel_event: asyncio.Event | None,
+    schedule_progress: Callable[[dict], None],
+    output_format: str,
+) -> Path:
+    input_svg, render_palette = await _render_input_svg(
+        payload,
+        work_dir,
+        callback_url=callback_url,
+        cancel_event=cancel_event,
+    )
+    base_fill = _base_fill(render_palette)
+    target_px = int(payload.get("manifest", {}).get("targetOutputPx") or SPHERE_PREVIEW_MAX_EDGE)
+
+    if output_format == "svg":
+        return await _package_and_finish(
+            work_dir,
+            [],
+            (INPUT_SVG,),
+            callback_url=callback_url,
+            schedule_progress=schedule_progress,
+            cancel_event=cancel_event,
+            packaging_start=70,
+        )
+
+    _ensure_not_cancelled(cancel_event)
+    input_jpg = work_dir / INPUT_JPG
+    await asyncio.to_thread(
+        rasterize_svg,
+        input_svg,
+        input_jpg,
+        max_edge=target_px,
+        background_color=base_fill,
+    )
+    await upload_job_file(callback_url, input_jpg)
+
+    return await _package_and_finish(
+        work_dir,
+        [],
+        (INPUT_JPG,),
+        callback_url=callback_url,
+        schedule_progress=schedule_progress,
+        cancel_event=cancel_event,
+        packaging_start=70,
+    )
+
+
+async def _process_job_globe(
     payload: dict,
     work_dir: Path,
     *,
@@ -481,107 +480,39 @@ async def _process_job_jpg(
     cancel_event: asyncio.Event | None,
     schedule_progress: Callable[[dict], None],
 ) -> Path:
-    manifest = payload["manifest"]
-    render_palette = resolve_render_palette(payload)
+    input_svg, render_palette = await _render_input_svg(
+        payload,
+        work_dir,
+        callback_url=callback_url,
+        cancel_event=cancel_event,
+    )
+    base_fill = _base_fill(render_palette)
     stripes = int(payload["stripes"])
     stripe_height_px = int(payload["stripeHeightPx"])
+    target_px = int(
+        payload.get("manifest", {}).get("targetOutputPx") or stripe_height_px or SPHERE_PREVIEW_MAX_EDGE
+    )
+
+    input_distorted_svg = work_dir / INPUT_DISTORTED_SVG
+    input_distorted_jpg = work_dir / INPUT_DISTORTED_JPG
 
     _ensure_not_cancelled(cancel_event)
-    tile_manifest = fetch_manifest(manifest, 14)
-    tile_count = len(tile_manifest["tiles"])
-    tile_steps = tile_count * 2
-    await report_progress(
-        callback_url,
-        {
-            "status": "fetching_tiles",
-            "progress": 5,
-            "stepCurrent": 0,
-            "stepTotal": tile_steps,
-            "stepUnit": "tile",
-        },
-    )
-    tiles_dir = work_dir / "tiles"
-
-    async def on_tile_progress(current: int, total: int) -> None:
-        _ensure_not_cancelled(cancel_event)
-        progress = 5 + round(45 * current / total)
-        await report_progress(
-            callback_url,
-            {
-                "status": "fetching_tiles",
-                "progress": progress,
-                "stepCurrent": current,
-                "stepTotal": total,
-                "stepUnit": "tile",
-            },
-        )
-
-    work_manifest = await render_tiles(
-        {**manifest, "targetOutputPx": int(manifest["targetOutputPx"]) * INPUT_SUPERSAMPLE},
-        render_palette,
-        tiles_dir,
-        on_progress=on_tile_progress,
-    )
+    await asyncio.to_thread(warp_svg_barrel, input_svg, input_distorted_svg)
+    await upload_job_file(callback_url, input_distorted_svg)
 
     _ensure_not_cancelled(cancel_event)
-    await report_progress(
-        callback_url,
-        {
-            "status": "stitching",
-            "progress": 50,
-            "stepCurrent": 0,
-            "stepTotal": work_manifest["tileRows"],
-            "stepUnit": "row",
-        },
-    )
-    input_jpg = work_dir / INPUT_JPG
-    input_distorted = work_dir / INPUT_DISTORTED_JPG
-
-    def on_row_progress(current: int, total: int) -> None:
-        _ensure_not_cancelled(cancel_event)
-        progress = 50 + round(10 * current / total)
-        schedule_progress(
-            {
-                "status": "stitching",
-                "progress": progress,
-                "stepCurrent": current,
-                "stepTotal": total,
-                "stepUnit": "row",
-            }
-        )
-
-    land_color = render_palette.get("land") or "#e8eddb"
-    base_fill = (
-        render_palette.get("baseFill")
-        or render_palette.get("background")
-        or land_color
-    )
-
-    stitch_tiles(
-        work_manifest,
-        tiles_dir,
-        input_jpg,
-        on_row_progress=on_row_progress,
-        background_color=land_color,
-        target_output_px=work_manifest.get("targetOutputPx"),
-    )
-    shutil.rmtree(tiles_dir, ignore_errors=True)
-    await upload_job_file(callback_url, input_jpg)
-
-    _ensure_not_cancelled(cancel_event)
-    shutil.copy2(input_jpg, input_distorted)
     await asyncio.to_thread(
-        spherical_prewarp,
-        input_distorted,
+        rasterize_svg,
+        input_distorted_svg,
+        input_distorted_jpg,
+        max_edge=max(target_px, stripe_height_px),
         background_color=base_fill,
     )
-    await upload_job_file(callback_url, input_distorted)
 
-    # Globe texture from continuous DePolar unwrap (better poles than gore montage).
     await upload_sphere_preview_from_map(
         callback_url,
         work_dir,
-        input_distorted,
+        input_distorted_jpg,
         background_color=base_fill,
     )
 
@@ -619,7 +550,7 @@ async def _process_job_jpg(
         stripe_height_px,
         on_progress=on_stripe_progress,
         background_color=base_fill,
-        source_jpg=input_distorted,
+        source_jpg=input_distorted_jpg,
         cancel_event=cancel_event,
         on_stripe_ready=on_stripe_ready,
     )
@@ -634,53 +565,16 @@ async def _process_job_jpg(
         },
     )
 
-    _ensure_not_cancelled(cancel_event)
-    zip_path = work_dir / "stripes.zip"
-    extras = (INPUT_JPG, INPUT_DISTORTED_JPG)
-    file_total = len(stripe_files) + sum(
-        1 for name in extras if (work_dir / name).exists()
-    )
-
-    def on_file_progress(current: int, total: int) -> None:
-        progress = 85 + round(15 * current / total)
-        schedule_progress(
-            {
-                "status": "packaging",
-                "progress": progress,
-                "stepCurrent": current,
-                "stepTotal": total,
-                "stepUnit": "file",
-            }
-        )
-
-    await report_progress(
-        callback_url,
-        {
-            "status": "packaging",
-            "progress": 85,
-            "stepCurrent": 0,
-            "stepTotal": file_total,
-            "stepUnit": "file",
-        },
-    )
-    create_zip(
+    return await _package_and_finish(
         work_dir,
         stripe_files,
-        zip_path,
-        extras=extras,
-        on_file_progress=on_file_progress,
+        (INPUT_SVG, INPUT_DISTORTED_SVG),
+        callback_url=callback_url,
+        schedule_progress=schedule_progress,
+        cancel_event=cancel_event,
+        stripe_count=stripes,
+        packaging_start=85,
     )
-    _finish_workdir(work_dir)
-
-    await report_progress(
-        callback_url,
-        {
-            "status": "complete",
-            "progress": 100,
-            "stripeCount": stripes,
-        },
-    )
-    return zip_path
 
 
 async def process_job(
@@ -690,10 +584,16 @@ async def process_job(
 ) -> Path:
     job_id = payload["jobId"]
     callback_url = payload.get("callbackUrl")
+    mode = str(payload.get("mode") or "globe").lower()
+    if mode not in {"map", "globe"}:
+        mode = "globe"
+
     output_format = str(payload.get("outputFormat") or "jpg").lower()
     if output_format not in {"jpg", "jpeg", "svg"}:
         output_format = "jpg"
     if output_format == "jpeg":
+        output_format = "jpg"
+    if mode == "globe":
         output_format = "jpg"
 
     loop = asyncio.get_running_loop()
@@ -707,15 +607,16 @@ async def process_job(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if output_format == "jpg":
-            return await _process_job_jpg(
+        if mode == "map":
+            return await _process_job_map(
                 payload,
                 work_dir,
                 callback_url=callback_url,
                 cancel_event=cancel_event,
                 schedule_progress=schedule_progress,
+                output_format=output_format,
             )
-        return await _process_job_svg(
+        return await _process_job_globe(
             payload,
             work_dir,
             callback_url=callback_url,

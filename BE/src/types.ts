@@ -16,15 +16,24 @@ export interface MapLayerSettings {
 
 export type MapLayerStyle = Record<MapLayerKey, MapLayerSettings>;
 
-/** Stripe artifact format produced by the processor. */
+/** Map = square export only; Globe = prewarp + JPEG stripes via slize.pl. */
+export type JobMode = "map" | "globe";
+
+/** Artifact format for the square map (Map mode) or forced jpg for Globe stripes. */
 export type OutputFormat = "jpg" | "svg";
 
 export interface JobRequest {
   center: LatLng;
   sideMeters: number;
-  stripes: number;
-  diameterCm: number;
-  /** Stripe output format — JPEG (slize.pl) or SVG (geometric warp). */
+  /** Job pipeline mode. Missing/legacy requests are treated as globe. */
+  mode?: JobMode;
+  /** Map-mode target edge length in pixels (500–10000). */
+  squareSidePx?: number;
+  /** Globe-mode stripe count (4–36). */
+  stripes?: number;
+  /** Globe-mode diameter in cm (10–60, one decimal); drives stripe height. */
+  diameterCm?: number;
+  /** Map mode: jpg|svg. Globe mode: always jpg. */
   outputFormat?: OutputFormat;
   /** Short place label for download naming (e.g. city from geocode). */
   placeName?: string;
@@ -102,6 +111,7 @@ export interface ProcessPayload {
   jobId: string;
   callbackUrl: string;
   manifest: TileManifest;
+  mode: JobMode;
   stripes: number;
   diameterCm: number;
   stripeHeightPx: number;

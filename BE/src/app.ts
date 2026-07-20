@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
-import type { JobRecord, JobRequest, ProcessPayload, ProgressUpdate } from "./types";
+import type { JobMode, JobRecord, JobRequest, OutputFormat, ProcessPayload, ProgressUpdate } from "./types";
 import {
   buildTileManifest,
   maxFeasibleZoom,
+  normalizeJobMode,
+  resolveTargetOutputPx,
+  resolveZoom,
   stripeHeightPx,
   stripeWidthPx,
   validateJobInput,
   squareBounds,
-  resolveZoom,
 } from "./osm/tile-math";
 import { buildMapStyle, buildRenderPalette, validateMapLayers } from "../../shared/map-style";
 import {
@@ -28,7 +30,7 @@ import {
   purgeJobArtifactsIfExpired,
   putArtifact,
 } from "./jobs/artifacts";
-import { stripeZipFilename } from "./jobs/filename";
+import { jobZipFilename } from "./jobs/filename";
 
 const DEV_ORIGINS = [
   "http://localhost:5173",
@@ -61,6 +63,30 @@ export function isApiRequest(request: Request): boolean {
 
 function processorBase(env: Env): string {
   return (env.PROCESSOR_URL ?? "").replace(/\/$/, "");
+}
+
+function normalizeRequest(body: JobRequest): JobRequest & {
+  mode: JobMode;
+  outputFormat: OutputFormat;
+  stripes: number;
+  diameterCm: number;
+  squareSidePx: number;
+} {
+  const mode = normalizeJobMode(body.mode);
+  const outputFormat: OutputFormat =
+    mode === "globe" ? "jpg" : body.outputFormat === "svg" ? "svg" : "jpg";
+  return {
+    ...body,
+    mode,
+    outputFormat,
+    stripes: Number.isFinite(Number(body.stripes)) ? Math.round(Number(body.stripes)) : 12,
+    diameterCm: Number.isFinite(Number(body.diameterCm))
+      ? Math.round(Number(body.diameterCm) * 10) / 10
+      : 25,
+    squareSidePx: Number.isFinite(Number(body.squareSidePx))
+      ? Math.round(Number(body.squareSidePx))
+      : 4000,
+  };
 }
 
 async function dispatchToProcessor(
@@ -127,24 +153,28 @@ async function cancelJob(env: Env, jobId: string): Promise<JobRecord | null> {
 }
 
 async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
-  const zoom = resolveZoom(job.request.center, job.request.sideMeters, job.request.diameterCm);
-  const manifest = buildTileManifest(job.request.center, job.request.sideMeters, {
+  const request = normalizeRequest(job.request);
+  const targetPx = resolveTargetOutputPx(request);
+  const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
+  const manifest = buildTileManifest(request.center, request.sideMeters, {
     zoom,
-    diameterCm: job.request.diameterCm,
+    targetOutputPx: targetPx,
   });
-  const stripeH = stripeHeightPx(job.request.diameterCm);
-  const mapLayers = validateMapLayers(job.request.mapLayers);
+  const stripeH =
+    request.mode === "globe" ? stripeHeightPx(request.diameterCm) : 0;
+  const mapLayers = validateMapLayers(request.mapLayers);
   const callbackOrigin = env.API_CALLBACK_ORIGIN ?? origin;
 
   const payload: ProcessPayload = {
     jobId: job.id,
     callbackUrl: `${callbackOrigin}/api/jobs/${job.id}/progress`,
     manifest,
-    stripes: job.request.stripes,
-    diameterCm: job.request.diameterCm,
-    stripeHeightPx: stripeH,
-    outputFormat: job.request.outputFormat === "svg" ? "svg" : "jpg",
-    placeName: job.request.placeName,
+    mode: request.mode,
+    stripes: request.stripes,
+    diameterCm: request.diameterCm,
+    stripeHeightPx: stripeH || targetPx,
+    outputFormat: request.outputFormat,
+    placeName: request.placeName,
     mapLayers,
     mapStyle: buildMapStyle(mapLayers),
     renderPalette: buildRenderPalette(mapLayers),
@@ -174,7 +204,7 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
     await updateJobProgress(env.ARTIFACTS, job.id, {
       status: "complete",
       progress: 100,
-      stripeCount: job.request.stripes,
+      stripeCount: request.mode === "globe" ? request.stripes : 0,
     });
     // Zip is the source of truth for download; keep preview JPEGs until download/TTL.
     const completed = await getJob(env.ARTIFACTS, job.id);
@@ -211,30 +241,38 @@ app.post("/api/jobs", async (c) => {
     return c.json({ error: validationError }, 400);
   }
 
+  const request = normalizeRequest(body);
+  const placeName =
+    typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
+  request.placeName = placeName;
+
   let manifest;
   try {
-    const zoom = resolveZoom(body.center, body.sideMeters, body.diameterCm);
-    manifest = buildTileManifest(body.center, body.sideMeters, { zoom, diameterCm: body.diameterCm });
+    const targetPx = resolveTargetOutputPx(request);
+    const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
+    manifest = buildTileManifest(request.center, request.sideMeters, {
+      zoom,
+      targetOutputPx: targetPx,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid map selection";
     return c.json({ error: message }, 400);
   }
 
   const now = new Date().toISOString();
-  const stripeH = stripeHeightPx(body.diameterCm);
-  const placeName =
-    typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
-  const outputFormat = body.outputFormat === "svg" ? "svg" : "jpg";
+  const stripeH =
+    request.mode === "globe" ? stripeHeightPx(request.diameterCm) : 0;
   const job: JobRecord = {
     id: createJobId(),
     status: "queued",
     progress: 0,
-    stripeCount: body.stripes,
-    stripeHeightPx: stripeH,
-    stripeWidthPx: stripeWidthPx(stripeH, body.stripes),
+    stripeCount: request.mode === "globe" ? request.stripes : 0,
+    stripeHeightPx: stripeH || undefined,
+    stripeWidthPx:
+      request.mode === "globe" ? stripeWidthPx(stripeH, request.stripes) : undefined,
     createdAt: now,
     updatedAt: now,
-    request: { ...body, placeName, outputFormat },
+    request,
   };
 
   await saveJob(c.env.ARTIFACTS, job);
@@ -251,7 +289,7 @@ app.post("/api/jobs", async (c) => {
         tileCount: manifest.tiles.length,
         outputSizePx: manifest.targetOutputPx,
         stripeHeightPx: stripeH,
-        stripeWidthPx: job.stripeWidthPx,
+        stripeWidthPx: job.stripeWidthPx ?? 0,
       },
     },
     202,
@@ -266,7 +304,8 @@ app.get("/api/jobs/:id", async (c) => {
 
   const hasArtifacts = job.artifactsAvailable !== false;
   const canDownload = job.status === "complete" && hasArtifacts;
-  const downloadFilename = stripeZipFilename(job.request.placeName, job.request.diameterCm);
+  const mode = normalizeJobMode(job.request.mode);
+  const downloadFilename = jobZipFilename({ ...job.request, mode });
 
   return c.json({
     id: job.id,
@@ -289,6 +328,8 @@ app.get("/api/jobs/:id", async (c) => {
     placeName: job.request.placeName,
     center: job.request.center,
     sideMeters: job.request.sideMeters,
+    mode,
+    squareSidePx: job.request.squareSidePx,
     stripes: job.request.stripes,
     diameterCm: job.request.diameterCm,
     outputFormat: job.request.outputFormat === "svg" ? "svg" : "jpg",
@@ -385,7 +426,8 @@ app.get("/api/jobs/:id/download", async (c) => {
     return c.json({ error: "Artifact missing" }, 404);
   }
 
-  const filename = stripeZipFilename(job.request.placeName, job.request.diameterCm);
+  const mode = normalizeJobMode(job.request.mode);
+  const filename = jobZipFilename({ ...job.request, mode });
   const headers = new Headers();
   headers.set("Content-Type", "application/zip");
   headers.set("Content-Disposition", `attachment; filename="${filename}"`);
@@ -447,19 +489,22 @@ app.post("/api/estimate", async (c) => {
   }
 
   try {
-    const zoom = resolveZoom(body.center, body.sideMeters, body.diameterCm);
-    const manifest = buildTileManifest(body.center, body.sideMeters, {
+    const request = normalizeRequest(body);
+    const targetPx = resolveTargetOutputPx(request);
+    const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
+    const manifest = buildTileManifest(request.center, request.sideMeters, {
       zoom,
-      diameterCm: body.diameterCm,
+      targetOutputPx: targetPx,
     });
-    const stripeH = stripeHeightPx(body.diameterCm);
+    const stripeH =
+      request.mode === "globe" ? stripeHeightPx(request.diameterCm) : 0;
     return c.json({
       zoom,
       tileCount: manifest.tiles.length,
       outputSizePx: manifest.outputSizePx,
       targetOutputPx: manifest.targetOutputPx,
       stripeHeightPx: stripeH,
-      stripeWidthPx: stripeWidthPx(stripeH, body.stripes),
+      stripeWidthPx: request.mode === "globe" ? stripeWidthPx(stripeH, request.stripes) : 0,
       bounds: manifest.bounds,
     });
   } catch (error) {

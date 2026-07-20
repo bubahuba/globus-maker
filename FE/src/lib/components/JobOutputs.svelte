@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { jobFileUrl } from '@lib/api/jobs';
 	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
-	import type { JobStatus, OutputFormat } from '@lib/types';
+	import type { JobMode, JobStatus, OutputFormat } from '@lib/types';
 
 	interface Props {
 		jobId: string | null;
@@ -12,7 +12,9 @@
 		revision?: string | null;
 		/** False after download/TTL — server deleted preview files. */
 		artifactsAvailable?: boolean;
-		/** Requested stripe format; inferred from filenames when absent. */
+		/** map = square only; globe = SVG maps + JPEG stripes. */
+		mode?: JobMode | null;
+		/** Map-mode format; Globe maps are always SVG. */
 		outputFormat?: OutputFormat | null;
 		visible: boolean;
 	}
@@ -24,28 +26,37 @@
 		status = null,
 		revision = null,
 		artifactsAvailable = true,
+		mode = null,
 		outputFormat = null,
 		visible
 	}: Props = $props();
 
-	const effectiveFormat = $derived.by((): OutputFormat => {
-		if (outputFormat === 'jpg' || outputFormat === 'svg') return outputFormat;
+	const effectiveMode = $derived.by((): JobMode => {
+		if (mode === 'map' || mode === 'globe') return mode;
 		const lower = files.map((f) => f.toLowerCase());
-		if (lower.some((f) => f === 'input.svg' || /^out-\d+\.svg$/.test(f))) return 'svg';
-		return 'jpg';
+		if (lower.some((f) => /^out-\d+\./.test(f) || f === 'input-distorted.svg' || f === 'input-distorted.jpg')) {
+			return 'globe';
+		}
+		return 'map';
 	});
 
 	const mapSlots = $derived.by(() => {
-		if (effectiveFormat === 'jpg') {
+		if (effectiveMode === 'globe') {
 			return [
-				{ filename: 'input.jpg', label: 'Stitched map' },
-				{ filename: 'input-distorted.jpg', label: 'Prewarped map' }
+				{ filename: 'input.svg', label: 'Stitched map' },
+				{ filename: 'input-distorted.svg', label: 'Prewarped map' }
 			] as const;
 		}
-		return [
-			{ filename: 'input.svg', label: 'Stitched map' },
-			{ filename: 'input-distorted.svg', label: 'Prewarped map' }
-		] as const;
+		const mapFile = outputFormat === 'svg' ? 'input.svg' : 'input.jpg';
+		// Infer from uploaded files when format unknown.
+		const lower = files.map((f) => f.toLowerCase());
+		if (outputFormat == null) {
+			if (lower.includes('input.svg')) {
+				return [{ filename: 'input.svg', label: 'Stitched map' }] as const;
+			}
+			return [{ filename: 'input.jpg', label: 'Stitched map' }] as const;
+		}
+		return [{ filename: mapFile, label: 'Stitched map' }] as const;
 	});
 
 	const readyMaps = $derived.by(() => {
@@ -56,13 +67,12 @@
 		}));
 	});
 
-	/** Processor writes out-00.{jpg|svg} … — UI shows highest index first. */
+	/** Globe stripes are always JPEG from slize.pl. */
 	const readyStripes = $derived.by(() => {
-		const pattern =
-			effectiveFormat === 'jpg' ? /^out-(\d+)\.jpe?g$/i : /^out-(\d+)\.svg$/i;
+		if (effectiveMode !== 'globe') return [];
 		return files
 			.map((filename) => {
-				const match = pattern.exec(filename);
+				const match = /^out-(\d+)\.jpe?g$/i.exec(filename);
 				if (!match) return null;
 				return { filename, index: Number(match[1]) };
 			})
@@ -71,16 +81,18 @@
 	});
 
 	const spherePreviewFile = $derived(
-		files.some((f) => f.toLowerCase() === 'input-distorted-preview.jpg')
+		effectiveMode === 'globe' &&
+			files.some((f) => f.toLowerCase() === 'input-distorted-preview.jpg')
 			? 'input-distorted-preview.jpg'
 			: null
 	);
 
 	const distortedReady = $derived(
-		files.some((f) => {
-			const n = f.toLowerCase();
-			return n === 'input-distorted.jpg' || n === 'input-distorted.svg';
-		})
+		effectiveMode === 'globe' &&
+			files.some((f) => {
+				const n = f.toLowerCase();
+				return n === 'input-distorted.jpg' || n === 'input-distorted.svg';
+			})
 	);
 
 	const showPlaceholders = $derived(
@@ -88,6 +100,7 @@
 	);
 
 	const stripeSlots = $derived.by(() => {
+		if (effectiveMode !== 'globe') return [];
 		const readyByIndex = new Map(readyStripes.map((item) => [item.index, item.filename]));
 		const expected = Math.max(0, Number(stripeCount) || 0);
 		const maxReady = readyStripes.reduce((max, item) => Math.max(max, item.index), -1);
@@ -112,9 +125,9 @@
 	const showPreviews = $derived(artifactsAvailable || files.length > 0);
 
 	const previewHelperText = $derived(
-		effectiveFormat === 'jpg'
-			? 'JPEG previews appear here as each file finishes processing.'
-			: 'Distorted SVG previews appear here as each file finishes processing.'
+		effectiveMode === 'map'
+			? 'The square map appears here when stitching finishes.'
+			: 'SVG map previews and JPEG stripes appear here as each file finishes processing.'
 	);
 
 	let sphereRevision = $state<string | null>(null);
@@ -129,7 +142,6 @@
 			sphereRevision = revision;
 		}
 	});
-
 </script>
 
 {#if visible && jobId}
@@ -172,53 +184,55 @@
 				{/each}
 			</div>
 
-			{#if spherePreviewFile && jobId}
-				<div class="space-y-2">
-					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
-					<p class="text-sm text-stone-500">
-						Globe from an ImageMagick DePolar unwrap of the prewarped map. Map centre is the
-						north pole.
-					</p>
-					<DistortedPanoramaViewer
-						src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
-					/>
-				</div>
-			{:else if (distortedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
-				<div class="space-y-2">
-					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
-					<p class="text-sm text-stone-500">Waiting for DePolar texture…</p>
+			{#if effectiveMode === 'globe'}
+				{#if spherePreviewFile && jobId}
+					<div class="space-y-2">
+						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
+						<p class="text-sm text-stone-500">
+							Globe from an ImageMagick DePolar unwrap of the prewarped map. Map centre is the
+							north pole.
+						</p>
+						<DistortedPanoramaViewer
+							src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
+						/>
+					</div>
+				{:else if (distortedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
+					<div class="space-y-2">
+						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
+						<p class="text-sm text-stone-500">Waiting for DePolar texture…</p>
+					</div>
+				{/if}
+
+				<div class="space-y-3">
+					<h3 class="text-base font-medium text-stone-900">Stripes</h3>
+					<div
+						class="grid w-full gap-2"
+						style:grid-template-columns="repeat({stripeColumns}, minmax(0, 1fr))"
+					>
+						{#each stripeSlots as slot (slot.key)}
+							<div class="flex min-w-0 flex-col items-center gap-1.5">
+								{#if slot.filename}
+									<img
+										src={jobFileUrl(jobId, slot.filename, revision ?? undefined)}
+										alt={slot.filename}
+										class="h-auto max-h-[500px] w-full rounded-md bg-stone-50 object-contain ring-1 ring-stone-200"
+									/>
+									<p class="w-full truncate text-center text-xs text-stone-500">
+										{slot.filename}
+									</p>
+								{:else}
+									<div
+										class="flex h-[min(40vw,500px)] w-full animate-pulse items-center justify-center rounded-md bg-stone-100 text-stone-400 ring-1 ring-stone-200"
+									>
+										…
+									</div>
+									<p class="text-xs text-stone-400">Waiting…</p>
+								{/if}
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
-
-			<div class="space-y-3">
-				<h3 class="text-base font-medium text-stone-900">Stripes</h3>
-				<div
-					class="grid w-full gap-2"
-					style:grid-template-columns="repeat({stripeColumns}, minmax(0, 1fr))"
-				>
-					{#each stripeSlots as slot (slot.key)}
-						<div class="flex min-w-0 flex-col items-center gap-1.5">
-							{#if slot.filename}
-								<img
-									src={jobFileUrl(jobId, slot.filename, revision ?? undefined)}
-									alt={slot.filename}
-									class="h-auto max-h-[500px] w-full rounded-md bg-stone-50 object-contain ring-1 ring-stone-200"
-								/>
-								<p class="w-full truncate text-center text-xs text-stone-500">
-									{slot.filename}
-								</p>
-							{:else}
-								<div
-									class="flex h-[min(40vw,500px)] w-full animate-pulse items-center justify-center rounded-md bg-stone-100 text-stone-400 ring-1 ring-stone-200"
-								>
-									…
-								</div>
-								<p class="text-xs text-stone-400">Waiting…</p>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			</div>
 		{/if}
 	</section>
 {/if}

@@ -1,5 +1,5 @@
 ---
-description: Python processor container and SVG stripe pipeline
+description: Python processor container and SVG-first map/globe pipeline
 globs: container/**/*
 alwaysApply: false
 ---
@@ -16,13 +16,24 @@ While waiting, callbacks report `{ status: "queued", queuePosition, queueLength 
 
 ## Pipeline (`process.py`)
 
-1. Fetch MVT tiles → build square SVG map (`svg_map.py`) → `input.svg`
-2. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg`
-3. Stereographic → TM stripe projection → `out-*.svg`
-4. Montage stripe gores side-by-side → `input-distorted-preview.jpg` (globe UI; N columns = stripe count)
-5. Zip `input.svg` + `input-distorted.svg` + stripe SVGs → return to API
+Always:
 
-Legacy bitmap helpers (`tile_render.py` Pillow path, `stitch.py`, `slize.pl`, `distort.spherical_prewarp`) remain for tests/fallback but are not used by `process_job`.
+1. Fetch MVT tiles → square `input.svg` (`svg_map.py`)
+
+**Map mode** (`mode: "map"`):
+
+2. Optional: rasterize SVG → `input.jpg` when `outputFormat` is jpg
+3. Zip `input.svg` or `input.jpg` → return (no prewarp / stripes)
+
+**Globe mode** (`mode: "globe"`):
+
+2. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg`
+3. Rasterize prewarped SVG → `input-distorted.jpg`
+4. DePolar sphere preview JPEG for UI
+5. `slize.pl` → `out-*.jpg` stripes
+6. Zip `input.svg` + `input-distorted.svg` + stripe JPGs → return
+
+Legacy bitmap helpers (`tile_render.py` Pillow path, `stitch.py`, `distort.spherical_prewarp`, SVG `project_all_stripes`) remain for tests but are not used by `process_job`.
 
 ## Progress callbacks
 

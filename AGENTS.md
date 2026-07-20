@@ -1,6 +1,6 @@
 # Globus Maker — Agent Guide
 
-Web app: select an OSM region → generate globe meridian stripe images.
+Web app: select an OSM region → export a square map (Map mode) or generate globe meridian stripe JPEGs (Globe mode).
 
 ## Quick commands
 
@@ -16,7 +16,7 @@ npm run deploy
 - **FE/** — SvelteKit 5 + Tailwind + Leaflet (`@lib`, `@shared` aliases)
 - **BE/src/** — Hono API, tile math, job store
 - **worker.ts** — Cloudflare Worker entry
-- **container/** — Python processor (tiles → stitch → slize.pl → zip)
+- **container/** — Python processor (MVT → SVG map → optional prewarp → slize.pl JPEG stripes → zip)
 - **shared/** — `map-style.ts` (layers, MapLibre style, render palette)
 
 ## Cursor context
@@ -35,8 +35,9 @@ Skills in `.cursor/skills/` (load when relevant):
 
 ## Critical invariants
 
-- Stripe height: `diameterCm × 160` px
+- Modes: `map` (square export) | `globe` (prewarp + JPEG stripes via `slize.pl`)
+- Stripe height: `diameterCm × 160` px (Globe); Map uses `squareSidePx` (500–10000)
 - Keep `BE/src/types.ts` and `FE/src/lib/types.ts` aligned
 - Map layers: single source in `shared/map-style.ts`
-- Job download/previews are distorted **SVG** (`input.svg`, `input-distorted.svg`, `out-*.svg`); globe preview may use a JPEG
+- Always stitch via SVG tiles (`input.svg`). Globe: prewarp SVG → rasterize → `out-*.jpg`. Map: zip `input.svg` or rasterized `input.jpg`
 - Run `npm test` after `tile-math.ts` changes

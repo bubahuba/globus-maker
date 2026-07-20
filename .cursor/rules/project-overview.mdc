@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Globus Maker
 
-Web app to download an OSM region and generate globe meridian stripes (Panotools `slize.pl` pipeline).
+Web app to download an OSM region as a square map, or generate globe meridian stripes (SVG stitch + Panotools `slize.pl` JPEG stripes).
 
 ## Layout
 
@@ -34,6 +34,6 @@ Individual services: `dev:processor`, `dev:api`, `dev:fe`. Skip processor: `npm 
 - Keep `BE/src/types.ts` and `FE/src/lib/types.ts` in sync for API contracts
 - Map layer types/logic live in `shared/map-style.ts` — don't duplicate
 - Tile math lives in `BE/src/osm/tile-math.ts`; run `npm test` after changes
-- Stripe height: `diameterCm × 160` px; width formula in `stripeWidthPx()`
-- Job outputs are distorted **SVG** (zip + previews); globe preview may use a JPEG DePolar raster
-- Job statuses: `queued` → `fetching_tiles` → `stitching` → `projecting` → `packaging` → `complete` | `failed`
+- Modes: `map` | `globe`. Stripe height: `diameterCm × 160` px; Map size: `squareSidePx`
+- Always stitch via SVG (`input.svg`). Globe: prewarp SVG → JPEG via `slize.pl` (`out-*.jpg`). Map: `input.svg` or rasterized `input.jpg`
+- Job statuses: `queued` → `fetching_tiles` → `stitching` → (`projecting` globe only) → `packaging` → `complete` | `failed`
