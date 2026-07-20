@@ -139,6 +139,11 @@ export interface ProcessPayload {
   mapLayers: MapLayerStyle;
   mapStyle: Record<string, unknown>;
   renderPalette: RenderPalette;
+  /**
+   * When set (globe + user upload), processor downloads this square map and
+   * skips OSM tile fetch / SVG stitch.
+   */
+  sourceMapUrl?: string;
 }
 
 export interface ProgressUpdate {

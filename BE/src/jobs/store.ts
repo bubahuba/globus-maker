@@ -104,7 +104,7 @@ export function isTerminalStatus(status: JobStatus): boolean {
 }
 
 const JOB_FILE_RE =
-  /^(?:(?:input|input-distorted)\.(?:jpg|jpeg|svg)|input-distorted-preview\.jpe?g|pole-caps\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
+  /^(?:(?:input|input-distorted|source-map)\.(?:jpg|jpeg|svg|png|webp)|input-distorted-preview\.jpe?g|pole-caps\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
 
 export function isAllowedJobFilename(name: string): boolean {
   return JOB_FILE_RE.test(name);
@@ -114,6 +114,7 @@ export function contentTypeForJobFile(name: string): string {
   if (/\.svg$/i.test(name)) return "image/svg+xml";
   if (/\.jpe?g$/i.test(name)) return "image/jpeg";
   if (/\.png$/i.test(name)) return "image/png";
+  if (/\.webp$/i.test(name)) return "image/webp";
   return "application/octet-stream";
 }
 

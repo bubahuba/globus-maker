@@ -5,6 +5,7 @@
 	import MapSelector from '@lib/components/MapSelector.svelte';
 	import MapLayerControls from '@lib/components/MapLayerControls.svelte';
 	import PlaceSearch from '@lib/components/PlaceSearch.svelte';
+	import UploadedMapPreview from '@lib/components/UploadedMapPreview.svelte';
 	import JobCard from '@lib/components/JobCard.svelte';
 	import JobOutputs from '@lib/components/JobOutputs.svelte';
 	import { cancelJob, createJob, estimateJob, getJob, pollJob } from '@lib/api/jobs';
@@ -29,6 +30,8 @@
 	const MIN_SQUARE_SIDE_PX = 500;
 	const MAX_SQUARE_SIDE_PX = 10000;
 	const DEFAULT_SQUARE_SIDE_PX = 4000;
+	const UPLOAD_ACCEPT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+	const UPLOAD_MAX_BYTES = 40 * 1024 * 1024;
 
 	function sideToSlider(meters: number): number {
 		return (100 * Math.log(meters / MIN_SIDE_METERS)) / Math.log(MAX_SIDE_METERS / MIN_SIDE_METERS);
@@ -59,6 +62,16 @@
 		const next = roundCm1(Number(circumference) / Math.PI);
 		if (!Number.isFinite(next)) return diameterCm;
 		return Math.min(60, Math.max(10, next));
+	}
+
+	function globeStripeHeightPx(diameter: number): number {
+		return Math.round(roundCm1(diameter) * 160);
+	}
+
+	function globeStripeWidthPx(heightPx: number, stripeCount: number): number {
+		const count = Math.round(Number(stripeCount));
+		const dx = 0.09 * (12 / count);
+		return Math.round(2 * dx * heightPx);
 	}
 
 	let center = $state<LatLng | null>(null);
@@ -99,6 +112,9 @@
 	let jobQueueLength = $state<number | undefined>(undefined);
 	let submitting = $state(false);
 	let openingJob = $state(false);
+	let uploadedMapFile = $state<File | null>(null);
+	let uploadedMapUrl = $state<string | null>(null);
+	let uploadFileInput: HTMLInputElement | undefined = $state();
 
 	/** Bumps to abort an in-flight poll when switching jobs. */
 	let pollEpoch = 0;
@@ -110,7 +126,7 @@
 	const generateButtonLabel = $derived(
 		submitting
 			? 'Generating…'
-			: !center
+			: !center && !uploadedMapUrl
 				? 'Select a place first'
 				: mode === 'map'
 					? 'Generate map'
@@ -253,7 +269,28 @@
 		document.getElementById('job-outputs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
+	function syntheticUploadedEstimate(): EstimateResponse {
+		const stripeHeight = globeStripeHeightPx(diameterCm);
+		const stripeWidth = globeStripeWidthPx(stripeHeight, stripes);
+		return {
+			zoom: 0,
+			tileCount: 0,
+			outputSizePx: stripeHeight,
+			targetOutputPx: stripeHeight,
+			stripeHeightPx: stripeHeight,
+			stripeWidthPx: stripeWidth,
+			bounds: { north: 0, south: 0, east: 0, west: 0 }
+		};
+	}
+
 	async function refreshEstimate() {
+		if (uploadedMapUrl) {
+			estimate = syntheticUploadedEstimate();
+			estimateError = null;
+			estimateLoading = false;
+			return;
+		}
+
 		if (!center) {
 			estimate = null;
 			estimateError = null;
@@ -288,7 +325,7 @@
 
 	function currentRequest(): JobRequest {
 		const base: JobRequest = {
-			center: center!,
+			center: center ?? { lat: 0, lng: 0 },
 			sideMeters,
 			mode,
 			...(placeName ? { placeName } : {}),
@@ -318,11 +355,48 @@
 		placeName = result.displayName.split(',')[0]?.trim() || result.displayName;
 	}
 
+	function clearUploadedMap() {
+		if (uploadedMapUrl) URL.revokeObjectURL(uploadedMapUrl);
+		uploadedMapFile = null;
+		uploadedMapUrl = null;
+		if (uploadFileInput) uploadFileInput.value = '';
+	}
+
+	function onUploadMapSelected(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		const typeOk = UPLOAD_ACCEPT_TYPES.includes(
+			file.type as (typeof UPLOAD_ACCEPT_TYPES)[number]
+		);
+		const extOk = /\.(jpe?g|png|webp)$/i.test(file.name);
+		if (!(typeOk || (!file.type && extOk))) {
+			estimateError = 'Please choose a JPEG, PNG, or WebP image.';
+			input.value = '';
+			return;
+		}
+		if (file.size > UPLOAD_MAX_BYTES) {
+			estimateError = 'Image must be 40 MB or smaller.';
+			input.value = '';
+			return;
+		}
+
+		if (uploadedMapUrl) URL.revokeObjectURL(uploadedMapUrl);
+		uploadedMapFile = file;
+		uploadedMapUrl = URL.createObjectURL(file);
+		if (!placeName) {
+			placeName = file.name.replace(/\.[^.]+$/, '').trim() || null;
+		}
+		estimateError = null;
+	}
+
 	$effect(() => {
 		center?.lat;
 		center?.lng;
 		sideMeters;
 		mode;
+		uploadedMapUrl;
 		if (mode === 'map') {
 			squareSidePx;
 		} else {
@@ -330,6 +404,10 @@
 			diameterCm;
 		}
 		scheduleEstimate();
+	});
+
+	$effect(() => {
+		if (mode === 'map') clearUploadedMap();
 	});
 
 	$effect(() => {
@@ -364,7 +442,7 @@
 	});
 
 	async function generateStripes() {
-		if (!center) return;
+		if (!center && !uploadedMapFile) return;
 
 		if (jobId && jobStatus && jobStatus !== 'complete' && jobStatus !== 'failed') {
 			cancelJob(jobId);
@@ -391,7 +469,7 @@
 		void scrollToJobSection();
 
 		try {
-			const created = await createJob(currentRequest());
+			const created = await createJob(currentRequest(), uploadedMapFile);
 			if (epoch !== pollEpoch) return;
 			jobId = created.jobId;
 			jobStatus = created.status;
@@ -433,18 +511,28 @@
 	<div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
 		<div class="sticky top-4 self-start">
 			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
-				<PlaceSearch onselect={onPlaceSelect} />
-				<div
-					class="aspect-square w-full overflow-hidden rounded-xl border border-stone-300 shadow-inner"
-				>
-					<MapSelector
-						{center}
-						{sideMeters}
-						tileZoom={estimate ? clampTileZoom(estimate.zoom) : null}
-						{mapLayers}
-						onchange={onSelectionChange}
+				{#if !uploadedMapUrl}
+					<PlaceSearch onselect={onPlaceSelect} />
+				{/if}
+				{#if uploadedMapUrl}
+					<UploadedMapPreview
+						src={uploadedMapUrl}
+						filename={uploadedMapFile?.name}
+						onclear={clearUploadedMap}
 					/>
-				</div>
+				{:else}
+					<div
+						class="aspect-square w-full overflow-hidden rounded-xl border border-stone-300 shadow-inner"
+					>
+						<MapSelector
+							{center}
+							{sideMeters}
+							tileZoom={estimate ? clampTileZoom(estimate.zoom) : null}
+							{mapLayers}
+							onchange={onSelectionChange}
+						/>
+					</div>
+				{/if}
 
 				{#if jobStatus && jobManifest}
 					<JobCard
@@ -517,24 +605,48 @@
 					</div>
 				</fieldset>
 
-				<label class="mb-4 block space-y-2">
-					<span class="text-sm text-stone-600">Square side map</span>
-					<input
-						type="range"
-						min="0"
-						max="100"
-						step="0.5"
-						value={sideToSlider(sideMeters)}
-						oninput={(event) => {
-							sideMeters = sliderToSide(Number(event.currentTarget.value));
-						}}
-						class="w-full accent-amber-700"
-					/>
-					<span class="text-sm font-medium text-stone-800">{formatSideMeters(sideMeters)}</span>
-					<span class="block text-xs text-stone-400">
-						{formatSideMeters(MIN_SIDE_METERS)} – {formatSideMeters(MAX_SIDE_METERS)}
-					</span>
-				</label>
+				{#if mode === 'globe'}
+					<div class="mb-4 space-y-2">
+						<input
+							bind:this={uploadFileInput}
+							type="file"
+							accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+							class="hidden"
+							onchange={onUploadMapSelected}
+						/>
+						<button
+							type="button"
+							onclick={() => uploadFileInput?.click()}
+							class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-amber-800 hover:bg-amber-50 hover:text-amber-900"
+						>
+							Upload map
+						</button>
+						<span class="block text-xs text-stone-400">
+							JPEG, PNG, or WebP — used instead of OSM tiles for stripes
+						</span>
+					</div>
+				{/if}
+
+				{#if !uploadedMapUrl}
+					<label class="mb-4 block space-y-2">
+						<span class="text-sm text-stone-600">Square side map</span>
+						<input
+							type="range"
+							min="0"
+							max="100"
+							step="0.5"
+							value={sideToSlider(sideMeters)}
+							oninput={(event) => {
+								sideMeters = sliderToSide(Number(event.currentTarget.value));
+							}}
+							class="w-full accent-amber-700"
+						/>
+						<span class="text-sm font-medium text-stone-800">{formatSideMeters(sideMeters)}</span>
+						<span class="block text-xs text-stone-400">
+							{formatSideMeters(MIN_SIDE_METERS)} – {formatSideMeters(MAX_SIDE_METERS)}
+						</span>
+					</label>
+				{/if}
 
 				{#if mode === 'map'}
 					<label class="mb-4 block space-y-2">
@@ -674,7 +786,7 @@
 				<button
 					type="button"
 					onclick={generateStripes}
-					disabled={submitting || !!estimateError || !center}
+					disabled={submitting || !!estimateError || (!center && !uploadedMapUrl)}
 					class="w-full rounded-xl bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-900 disabled:cursor-not-allowed disabled:bg-stone-300"
 				>
 					{generateButtonLabel}
@@ -683,7 +795,30 @@
 
 			<div class="rounded-2xl bg-stone-900 p-5 text-stone-100 shadow-sm">
 				<h2 class="mb-3 text-lg font-medium">Preview</h2>
-				{#if !center}
+				{#if uploadedMapUrl}
+					{#if estimateError}
+						<p class="text-sm text-red-300">{estimateError}</p>
+					{:else if estimate}
+						<dl class="space-y-2 text-sm">
+							<div class="flex justify-between gap-4">
+								<dt class="text-stone-400">Source</dt>
+								<dd class="truncate text-right">{uploadedMapFile?.name ?? 'Uploaded map'}</dd>
+							</div>
+							<div class="flex justify-between gap-4">
+								<dt class="text-stone-400">Map image</dt>
+								<dd>~{estimate.targetOutputPx.toLocaleString()}px square</dd>
+							</div>
+							{#if mode === 'globe'}
+								<div class="flex justify-between gap-4">
+									<dt class="text-stone-400">Stripe size</dt>
+									<dd>{estimate.stripeWidthPx} × {estimate.stripeHeightPx} px</dd>
+								</div>
+							{/if}
+						</dl>
+					{:else}
+						<p class="text-sm text-stone-400">Uploaded map</p>
+					{/if}
+				{:else if !center}
 					<p class="text-sm text-stone-400">Choose a location to see tile estimates.</p>
 				{:else if estimateError}
 					<p class="text-sm text-red-300">{estimateError}</p>
@@ -726,6 +861,11 @@
 
 			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
 				<MapLayerControls bind:value={mapLayers} />
+				{#if uploadedMapUrl}
+					<p class="mt-3 text-xs text-stone-400">
+						With an uploaded map, only Empty fill affects stripe gaps.
+					</p>
+				{/if}
 			</div>
 		</aside>
 	</div>

@@ -40,7 +40,21 @@ export async function estimateJob(request: JobRequest): Promise<EstimateResponse
 	return body as EstimateResponse;
 }
 
-export async function createJob(request: JobRequest): Promise<CreateJobResponse> {
+export async function createJob(
+	request: JobRequest,
+	sourceMap?: File | null
+): Promise<CreateJobResponse> {
+	if (sourceMap) {
+		const form = new FormData();
+		form.append('request', JSON.stringify(request));
+		form.append('sourceMap', sourceMap, sourceMap.name);
+		const response = await fetch('/api/jobs', {
+			method: 'POST',
+			body: form
+		});
+		return parseJson<CreateJobResponse>(response);
+	}
+
 	const response = await fetch('/api/jobs', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

@@ -1,7 +1,15 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
-import type { JobMode, JobRecord, JobRequest, OutputFormat, ProcessPayload, ProgressUpdate } from "./types";
+import type {
+  JobMode,
+  JobRecord,
+  JobRequest,
+  OutputFormat,
+  ProcessPayload,
+  ProgressUpdate,
+  TileManifest,
+} from "./types";
 import {
   buildTileManifest,
   maxFeasibleZoom,
@@ -10,6 +18,7 @@ import {
   resolveZoom,
   stripeHeightPx,
   stripeWidthPx,
+  stubManifestForUpload,
   validateJobInput,
   squareBounds,
 } from "./osm/tile-math";
@@ -169,14 +178,87 @@ async function cancelJob(env: Env, jobId: string): Promise<JobRecord | null> {
   return (await getJob(env.ARTIFACTS, jobId)) ?? job;
 }
 
-async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
+const SOURCE_MAP_MAX_BYTES = 40 * 1024 * 1024;
+const SOURCE_MAP_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+type SourceMapUpload = {
+  name: string;
+  type: string;
+  size: number;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
+function sourceMapFilename(contentType: string): string {
+  if (contentType === "image/png") return "source-map.png";
+  if (contentType === "image/webp") return "source-map.webp";
+  return "source-map.jpg";
+}
+
+function asSourceMapUpload(value: unknown): SourceMapUpload | null {
+  if (value == null || typeof value !== "object") return null;
+  const candidate = value as Partial<SourceMapUpload> & { arrayBuffer?: unknown };
+  if (typeof candidate.arrayBuffer !== "function" || typeof candidate.size !== "number") {
+    return null;
+  }
+  if (candidate.size <= 0) return null;
+  const name =
+    typeof candidate.name === "string" && candidate.name.trim()
+      ? candidate.name
+      : "source-map.jpg";
+  const type = typeof candidate.type === "string" ? candidate.type : "";
+  return {
+    name,
+    type,
+    size: candidate.size,
+    arrayBuffer: () => candidate.arrayBuffer!() as Promise<ArrayBuffer>,
+  };
+}
+
+async function parseCreateJobBody(c: {
+  req: {
+    header: (name: string) => string | undefined;
+    json: () => Promise<unknown>;
+    parseBody: (options?: { all?: boolean }) => Promise<Record<string, unknown>>;
+  };
+}): Promise<{ body: JobRequest; sourceMap: SourceMapUpload | null }> {
+  const contentType = c.req.header("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await c.req.parseBody({ all: true });
+    const raw = form["request"];
+    if (typeof raw !== "string") {
+      throw new Error("request JSON field required");
+    }
+    let body: JobRequest;
+    try {
+      body = JSON.parse(raw) as JobRequest;
+    } catch {
+      throw new Error("request must be valid JSON");
+    }
+    const fileField = form["sourceMap"];
+    const file = Array.isArray(fileField) ? fileField[0] : fileField;
+    return { body, sourceMap: asSourceMapUpload(file) };
+  }
+  return { body: (await c.req.json()) as JobRequest, sourceMap: null };
+}
+
+async function runJob(
+  env: Env,
+  job: JobRecord,
+  origin: string,
+  options?: { sourceMapFilename?: string },
+): Promise<void> {
   const request = normalizeRequest(job.request);
   const targetPx = resolveTargetOutputPx(request);
-  const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
-  const manifest = buildTileManifest(request.center, request.sideMeters, {
-    zoom,
-    targetOutputPx: targetPx,
-  });
+  const sourceMapName = options?.sourceMapFilename;
+  const manifest: TileManifest = sourceMapName
+    ? stubManifestForUpload(targetPx)
+    : (() => {
+        const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
+        return buildTileManifest(request.center, request.sideMeters, {
+          zoom,
+          targetOutputPx: targetPx,
+        });
+      })();
   const stripeH =
     request.mode === "globe" ? stripeHeightPx(request.diameterCm) : 0;
   const mapLayers = validateMapLayers(request.mapLayers);
@@ -195,6 +277,9 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
     mapLayers,
     mapStyle: buildMapStyle(mapLayers),
     renderPalette: buildRenderPalette(mapLayers),
+    ...(sourceMapName
+      ? { sourceMapUrl: `${callbackOrigin}/api/jobs/${job.id}/files/${sourceMapName}` }
+      : {}),
   };
 
   try {
@@ -252,25 +337,61 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 app.post("/api/jobs", async (c) => {
-  const body = (await c.req.json()) as JobRequest;
-  const validationError = validateJobInput(body);
+  let body: JobRequest;
+  let sourceMap: SourceMapUpload | null;
+  try {
+    ({ body, sourceMap } = await parseCreateJobBody(c));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid job request";
+    return c.json({ error: message }, 400);
+  }
+
+  const hasSourceMap = sourceMap != null;
+  if (hasSourceMap) {
+    if (sourceMap.size > SOURCE_MAP_MAX_BYTES) {
+      return c.json({ error: "sourceMap must be 40 MB or smaller" }, 400);
+    }
+    const type = (sourceMap.type || "").toLowerCase();
+    const name = sourceMap.name.toLowerCase();
+    const extOk = /\.(jpe?g|png|webp)$/i.test(name);
+    if (type ? !SOURCE_MAP_TYPES.has(type) : !extOk) {
+      return c.json({ error: "sourceMap must be JPEG, PNG, or WebP" }, 400);
+    }
+  }
+
+  const validationError = validateJobInput(body, { hasSourceMap });
   if (validationError) {
     return c.json({ error: validationError }, 400);
   }
 
   const request = normalizeRequest(body);
+  if (hasSourceMap && request.mode !== "globe") {
+    return c.json({ error: "Uploaded map is only supported in Globe mode" }, 400);
+  }
+  // Upload-only jobs may omit a real map center; keep a stable stub for storage.
+  if (hasSourceMap && (!Number.isFinite(request.center?.lat) || !Number.isFinite(request.center?.lng))) {
+    request.center = { lat: 0, lng: 0 };
+  }
+  if (hasSourceMap && (!Number.isFinite(request.sideMeters) || request.sideMeters <= 0)) {
+    request.sideMeters = 2500;
+  }
+
   const placeName =
     typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
   request.placeName = placeName;
 
-  let manifest;
+  let manifest: TileManifest;
   try {
     const targetPx = resolveTargetOutputPx(request);
-    const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
-    manifest = buildTileManifest(request.center, request.sideMeters, {
-      zoom,
-      targetOutputPx: targetPx,
-    });
+    if (hasSourceMap) {
+      manifest = stubManifestForUpload(targetPx);
+    } else {
+      const zoom = resolveZoom(request.center, request.sideMeters, targetPx);
+      manifest = buildTileManifest(request.center, request.sideMeters, {
+        zoom,
+        targetOutputPx: targetPx,
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid map selection";
     return c.json({ error: message }, 400);
@@ -294,8 +415,30 @@ app.post("/api/jobs", async (c) => {
 
   await saveJob(c.env.ARTIFACTS, job);
 
+  let storedSourceName: string | undefined;
+  if (hasSourceMap && sourceMap) {
+    let type = (sourceMap.type || "").toLowerCase();
+    if (!SOURCE_MAP_TYPES.has(type)) {
+      const name = sourceMap.name.toLowerCase();
+      if (name.endsWith(".png")) type = "image/png";
+      else if (name.endsWith(".webp")) type = "image/webp";
+      else type = "image/jpeg";
+    }
+    storedSourceName = sourceMapFilename(type);
+    const bytes = await sourceMap.arrayBuffer();
+    await putArtifact(
+      c.env.ARTIFACTS,
+      `jobs/${job.id}/files/${storedSourceName}`,
+      bytes,
+      contentTypeForJobFile(storedSourceName),
+    );
+    await addJobFile(c.env.ARTIFACTS, job.id, storedSourceName);
+  }
+
   const origin = new URL(c.req.url).origin;
-  c.executionCtx.waitUntil(runJob(c.env, job, origin));
+  c.executionCtx.waitUntil(
+    runJob(c.env, job, origin, { sourceMapFilename: storedSourceName }),
+  );
 
   return c.json(
     {

@@ -16,7 +16,9 @@ from distort import (
     draw_stripe_cut_line,
     jpeg_preview_bytes,
     rasterize_svg,
+    spherical_prewarp,
 )
+from PIL import Image
 from job_queue import JobCancelled
 from svg_map import render_svg_map
 from svg_warp import warp_svg_barrel
@@ -483,6 +485,100 @@ async def _prewarp_for_stripes(
     return input_distorted_jpg
 
 
+def _prepare_square_jpeg(source: Path, dest: Path, target_px: int) -> None:
+    """Center-crop to square and resize to ``target_px`` as JPEG."""
+    size = max(1, int(target_px))
+    with Image.open(source) as img:
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        cropped = rgb.crop((left, top, left + side, top + side))
+        if cropped.size != (size, size):
+            cropped = cropped.resize((size, size), Image.Resampling.LANCZOS)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cropped.save(dest, format="JPEG", quality=95, optimize=True)
+
+
+async def _download_source_map(url: str, dest: Path) -> None:
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        dest.write_bytes(response.content)
+
+
+async def _prepare_uploaded_input_jpg(
+    payload: dict,
+    work_dir: Path,
+    *,
+    callback_url: str | None,
+    cancel_event: asyncio.Event | None,
+) -> tuple[Path, dict]:
+    """Download user map → square ``input.jpg``; skip OSM tiles / SVG stitch."""
+    source_url = str(payload.get("sourceMapUrl") or "").strip()
+    if not source_url:
+        raise ValueError("sourceMapUrl is required for uploaded map jobs")
+
+    render_palette = resolve_render_palette(payload)
+    stripe_height_px = int(payload.get("stripeHeightPx") or 0)
+    target_px = int(
+        payload.get("manifest", {}).get("targetOutputPx") or stripe_height_px or SPHERE_PREVIEW_MAX_EDGE
+    )
+
+    _ensure_not_cancelled(cancel_event)
+    await report_progress(
+        callback_url,
+        {
+            "status": "fetching_tiles",
+            "progress": 10,
+            "stepCurrent": 0,
+            "stepTotal": 1,
+            "stepUnit": "tile",
+        },
+    )
+
+    raw_path = work_dir / "_source-map-upload"
+    await _download_source_map(source_url, raw_path)
+
+    _ensure_not_cancelled(cancel_event)
+    await report_progress(
+        callback_url,
+        {
+            "status": "stitching",
+            "progress": 40,
+            "stepCurrent": 1,
+            "stepTotal": 1,
+            "stepUnit": "row",
+        },
+    )
+
+    input_jpg = work_dir / INPUT_JPG
+    await asyncio.to_thread(_prepare_square_jpeg, raw_path, input_jpg, target_px)
+    raw_path.unlink(missing_ok=True)
+    await upload_job_file(callback_url, input_jpg)
+    return input_jpg, render_palette
+
+
+async def _prewarp_uploaded_jpg(
+    work_dir: Path,
+    input_jpg: Path,
+    *,
+    cancel_event: asyncio.Event | None,
+    base_fill: str,
+) -> Path:
+    """JPEG BarrelInverse prewarp for uploaded maps (no SVG warp)."""
+    _ensure_not_cancelled(cancel_event)
+    input_distorted_jpg = work_dir / INPUT_DISTORTED_JPG
+    shutil.copy2(input_jpg, input_distorted_jpg)
+    await asyncio.to_thread(
+        spherical_prewarp,
+        input_distorted_jpg,
+        background_color=base_fill,
+    )
+    return input_distorted_jpg
+
+
 async def _process_job_map(
     payload: dict,
     work_dir: Path,
@@ -542,12 +638,32 @@ async def _process_job_globe(
     cancel_event: asyncio.Event | None,
     schedule_progress: Callable[[dict], None],
 ) -> Path:
-    input_svg, render_palette = await _render_input_svg(
-        payload,
-        work_dir,
-        callback_url=callback_url,
-        cancel_event=cancel_event,
-    )
+    source_map_url = str(payload.get("sourceMapUrl") or "").strip()
+    uploaded = bool(source_map_url)
+    tiles = payload.get("manifest", {}).get("tiles") or []
+    if not uploaded and not tiles:
+        raise ValueError(
+            "Job has no OSM tiles and no sourceMapUrl — rebuild/restart the processor "
+            "and ensure the API sends sourceMapUrl for uploaded maps"
+        )
+
+    if uploaded:
+        input_jpg, render_palette = await _prepare_uploaded_input_jpg(
+            payload,
+            work_dir,
+            callback_url=callback_url,
+            cancel_event=cancel_event,
+        )
+        map_source: Path = input_jpg
+    else:
+        input_svg, render_palette = await _render_input_svg(
+            payload,
+            work_dir,
+            callback_url=callback_url,
+            cancel_event=cancel_event,
+        )
+        map_source = input_svg
+
     base_fill = _base_fill(render_palette)
     stripes = int(payload["stripes"])
     stripe_height_px = int(payload["stripeHeightPx"])
@@ -555,22 +671,30 @@ async def _process_job_globe(
         payload.get("manifest", {}).get("targetOutputPx") or stripe_height_px or SPHERE_PREVIEW_MAX_EDGE
     )
 
-    # Sphere overview uses the stitched square map (not the prewarped SVG).
+    # Sphere overview uses the square map (SVG stitch or uploaded JPEG).
     await upload_sphere_preview_from_map(
         callback_url,
         work_dir,
-        input_svg,
+        map_source,
         background_color=base_fill,
     )
 
-    input_distorted_jpg = await _prewarp_for_stripes(
-        work_dir,
-        input_svg,
-        callback_url=callback_url,
-        cancel_event=cancel_event,
-        base_fill=base_fill,
-        raster_max_edge=max(target_px, stripe_height_px),
-    )
+    if uploaded:
+        input_distorted_jpg = await _prewarp_uploaded_jpg(
+            work_dir,
+            map_source,
+            cancel_event=cancel_event,
+            base_fill=base_fill,
+        )
+    else:
+        input_distorted_jpg = await _prewarp_for_stripes(
+            work_dir,
+            map_source,
+            callback_url=callback_url,
+            cancel_event=cancel_event,
+            base_fill=base_fill,
+            raster_max_edge=max(target_px, stripe_height_px),
+        )
 
     diameter_cm = float(payload.get("diameterCm") or 0)
     if diameter_cm <= 0:
@@ -638,10 +762,11 @@ async def _process_job_globe(
         },
     )
 
+    zip_extras = (INPUT_JPG, POLE_CAPS_JPG) if uploaded else (INPUT_SVG, POLE_CAPS_JPG)
     return await _package_and_finish(
         work_dir,
         stripe_files,
-        (INPUT_SVG, POLE_CAPS_JPG),
+        zip_extras,
         callback_url=callback_url,
         schedule_progress=schedule_progress,
         cancel_event=cancel_event,

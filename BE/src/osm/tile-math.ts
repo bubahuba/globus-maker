@@ -244,17 +244,11 @@ export function resolveZoomFromDiameter(
   return resolveZoom(center, sideMeters, stripeHeightPx(diameterCm));
 }
 
-export function validateJobInput(input: JobRequest): string | null {
-  if (!Number.isFinite(input.center.lat) || input.center.lat < -85 || input.center.lat > 85) {
-    return "Invalid latitude";
-  }
-  if (!Number.isFinite(input.center.lng) || input.center.lng < -180 || input.center.lng > 180) {
-    return "Invalid longitude";
-  }
-  if (!Number.isFinite(input.sideMeters) || input.sideMeters < 100 || input.sideMeters > MAX_SIDE_METERS) {
-    return `sideMeters must be between 100 and ${MAX_SIDE_METERS}`;
-  }
-
+export function validateJobInput(
+  input: JobRequest,
+  options?: { hasSourceMap?: boolean },
+): string | null {
+  const hasSourceMap = options?.hasSourceMap === true;
   const mode = normalizeJobMode(input.mode);
   if (input.mode != null && input.mode !== "map" && input.mode !== "globe") {
     return "mode must be map or globe";
@@ -266,6 +260,34 @@ export function validateJobInput(input: JobRequest): string | null {
     input.outputFormat !== "svg"
   ) {
     return "outputFormat must be jpg or svg";
+  }
+
+  if (hasSourceMap) {
+    if (mode !== "globe") {
+      return "Uploaded map is only supported in Globe mode";
+    }
+    const stripes = Math.round(Number(input.stripes));
+    if (!Number.isFinite(stripes) || stripes < 4 || stripes > 36) {
+      return "stripes must be an integer between 4 and 36";
+    }
+    const diameterCm = Number(input.diameterCm);
+    if (!Number.isFinite(diameterCm) || diameterCm < 10 || diameterCm > 60) {
+      return "diameterCm must be between 10 and 60";
+    }
+    if (input.outputFormat === "svg") {
+      return "Globe mode only supports JPEG stripe output";
+    }
+    return null;
+  }
+
+  if (!Number.isFinite(input.center.lat) || input.center.lat < -85 || input.center.lat > 85) {
+    return "Invalid latitude";
+  }
+  if (!Number.isFinite(input.center.lng) || input.center.lng < -180 || input.center.lng > 180) {
+    return "Invalid longitude";
+  }
+  if (!Number.isFinite(input.sideMeters) || input.sideMeters < 100 || input.sideMeters > MAX_SIDE_METERS) {
+    return `sideMeters must be between 100 and ${MAX_SIDE_METERS}`;
   }
 
   if (mode === "map") {
@@ -303,4 +325,19 @@ export function validateJobInput(input: JobRequest): string | null {
     return error instanceof Error ? error.message : "Invalid map selection";
   }
   return null;
+}
+
+/** Stub manifest when stripes are generated from an uploaded square map (no OSM tiles). */
+export function stubManifestForUpload(targetOutputPx: number): TileManifest {
+  const size = Math.max(1, Math.round(targetOutputPx));
+  return {
+    zoom: 0,
+    tiles: [],
+    tileCols: 0,
+    tileRows: 0,
+    cropBox: { left: 0, top: 0, width: size, height: size },
+    bounds: { north: 0, south: 0, east: 0, west: 0 },
+    outputSizePx: size,
+    targetOutputPx: size,
+  };
 }

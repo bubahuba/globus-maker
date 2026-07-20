@@ -53,20 +53,19 @@
 	});
 
 	const mapSlots = $derived.by(() => {
-		if (effectiveMode === 'globe') {
-			return [{ filename: 'input.svg', label: 'Stitched map' }] as const;
-		}
-		// Prefer whatever the job actually uploaded (globe jobs only have SVG;
-		// map jpg/svg exports differ). Fall back to outputFormat while waiting.
+		// Prefer whatever the job actually produced (upload → input.jpg; OSM stitch → input.svg).
 		const lower = files.map((f) => f.toLowerCase());
 		const jpgName = lower.find((f) => f === 'input.jpg' || f === 'input.jpeg');
+		const hasUploadedSource = lower.some((f) => f.startsWith('source-map.'));
 		const mapFile = jpgName
 			? (files.find((f) => f.toLowerCase() === jpgName) ?? jpgName)
 			: lower.includes('input.svg')
 				? 'input.svg'
-				: outputFormat === 'svg'
-					? 'input.svg'
-					: 'input.jpg';
+				: hasUploadedSource
+					? 'input.jpg'
+					: effectiveMode === 'globe' || outputFormat === 'svg'
+						? 'input.svg'
+						: 'input.jpg';
 		return [{ filename: mapFile, label: 'Stitched map' }] as const;
 	});
 
@@ -105,7 +104,7 @@
 	);
 
 	const stitchedReady = $derived(
-		effectiveMode === 'globe' && files.some((f) => f.toLowerCase() === 'input.svg')
+		effectiveMode === 'globe' && readyMaps.some((slot) => slot.ready)
 	);
 
 	const showPlaceholders = $derived(
@@ -132,8 +131,9 @@
 		}
 
 		// Globe: stitch → sphere → pole caps → stripes (in order).
-		if (!fileSet.has('input.svg')) {
-			return { kind: 'map', filename: 'input.svg' };
+		const stitchedMapFile = mapSlots[0]?.filename;
+		if (stitchedMapFile && !fileSet.has(stitchedMapFile.toLowerCase())) {
+			return { kind: 'map', filename: stitchedMapFile };
 		}
 		if (!fileSet.has('input-distorted-preview.jpg')) {
 			return { kind: 'sphere' };

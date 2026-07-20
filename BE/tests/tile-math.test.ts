@@ -129,6 +129,33 @@ assert(
   "map squareSidePx above 10000 should fail",
 );
 
+assert(
+  validateJobInput(
+    {
+      center: { lat: 0, lng: 0 },
+      sideMeters: 1,
+      mode: "globe",
+      stripes: 12,
+      diameterCm: 25,
+    },
+    { hasSourceMap: true },
+  ) === null,
+  "uploaded globe map should skip OSM selection checks",
+);
+
+assert(
+  validateJobInput(
+    {
+      center: { lat: 0, lng: 0 },
+      sideMeters: 1,
+      mode: "map",
+      squareSidePx: 4000,
+    },
+    { hasSourceMap: true },
+  ) != null,
+  "uploaded map must be globe mode",
+);
+
 console.log("tile-math tests passed");
 console.log(
   JSON.stringify(
