@@ -57,7 +57,7 @@ def svg_land_fill_color(root: ET.Element, default: str = "#e8eddb") -> str:
 
 
 def set_svg_background(root: ET.Element, fill: str) -> None:
-    """Set root SVG ``style="background:…"`` and drop a legacy data-bg rect if present."""
+    """Set root SVG ``style="background:…"`` and sync the opaque ``data-bg`` rect."""
     style = root.attrib.get("style") or ""
     parts = [p.strip() for p in style.split(";") if p.strip()]
     kept = [
@@ -68,10 +68,32 @@ def set_svg_background(root: ET.Element, fill: str) -> None:
     ]
     kept.insert(0, f"background:{fill}")
     root.set("style", ";".join(kept))
+
+    bg_rect = None
     for child in list(root):
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
         if tag == "rect" and child.attrib.get("data-bg") == "1":
-            root.remove(child)
+            bg_rect = child
+            break
+    if bg_rect is not None:
+        bg_rect.set("fill", fill)
+        return
+
+    # Ensure ImageMagick/rsvg get opaque pixels (CSS background alone is not enough).
+    vb = (root.attrib.get("viewBox") or "0 0 1 1").split()
+    try:
+        width = float(vb[2]) if len(vb) == 4 else float(root.attrib.get("width", 1))
+        height = float(vb[3]) if len(vb) == 4 else float(root.attrib.get("height", 1))
+    except (TypeError, ValueError):
+        width = height = 1.0
+    rect = ET.Element(f"{{{_NS}}}rect")
+    rect.set("data-bg", "1")
+    rect.set("x", "0")
+    rect.set("y", "0")
+    rect.set("width", _fmt(width))
+    rect.set("height", _fmt(height))
+    rect.set("fill", fill)
+    root.insert(0, rect)
 
 
 def parse_barrel_args(args: str | tuple[float, ...] = BARREL_INVERSE_ARGS) -> tuple[float, float, float, float]:

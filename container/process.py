@@ -11,6 +11,7 @@ import httpx
 from distort import (
     SPHERE_PREVIEW_MAX_EDGE,
     build_depolar_sphere_preview,
+    build_pole_caps,
     rasterize_svg,
 )
 from job_queue import JobCancelled
@@ -23,6 +24,7 @@ INPUT_SVG = "input.svg"
 INPUT_DISTORTED_SVG = "input-distorted.svg"
 INPUT_JPG = "input.jpg"
 INPUT_DISTORTED_JPG = "input-distorted.jpg"
+POLE_CAPS_JPG = "pole-caps.jpg"
 
 
 def _ensure_not_cancelled(cancel_event: asyncio.Event | None) -> None:
@@ -563,6 +565,21 @@ async def _process_job_globe(
         raster_max_edge=max(target_px, stripe_height_px),
     )
 
+    diameter_cm = float(payload.get("diameterCm") or 0)
+    if diameter_cm <= 0:
+        diameter_cm = stripe_height_px / 160.0
+
+    _ensure_not_cancelled(cancel_event)
+    pole_caps = work_dir / POLE_CAPS_JPG
+    await asyncio.to_thread(
+        build_pole_caps,
+        input_distorted_jpg,
+        pole_caps,
+        diameter_cm=diameter_cm,
+        empty_fill=base_fill,
+    )
+    await upload_job_file(callback_url, pole_caps)
+
     _ensure_not_cancelled(cancel_event)
     await report_progress(
         callback_url,
@@ -615,7 +632,7 @@ async def _process_job_globe(
     return await _package_and_finish(
         work_dir,
         stripe_files,
-        (INPUT_SVG, INPUT_DISTORTED_SVG),
+        (INPUT_SVG, INPUT_DISTORTED_SVG, POLE_CAPS_JPG),
         callback_url=callback_url,
         schedule_progress=schedule_progress,
         cancel_event=cancel_event,

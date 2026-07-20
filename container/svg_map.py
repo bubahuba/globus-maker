@@ -207,6 +207,10 @@ class _SvgBuilder:
             '<?xml version="1.0" encoding="UTF-8"?>',
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {_fmt(s)} {_fmt(s)}" '
             f'style="background:{self.canvas_color}"{land_attr}>',
+            # Opaque canvas — CSS background alone is ignored by ImageMagick/rsvg and
+            # becomes black after JPEG / DePolar.
+            f'<rect data-bg="1" x="0" y="0" width="{_fmt(s)}" height="{_fmt(s)}" '
+            f'fill="{self.canvas_color}"/>',
         ]
         order = [
             "landcover",

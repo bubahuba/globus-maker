@@ -41,7 +41,8 @@ function sortJobFiles(files: Iterable<string>): string[] {
     if (lower === "input.svg" || lower === "input.jpg") return 0;
     if (lower === "input-distorted.svg" || lower === "input-distorted.jpg") return 1;
     if (lower === "input-distorted-preview.jpg") return 2;
-    return 3;
+    if (lower === "pole-caps.jpg") return 3;
+    return 4;
   };
   return [...files].sort((a, b) => {
     const diff = rank(a) - rank(b);
@@ -103,7 +104,7 @@ export function isTerminalStatus(status: JobStatus): boolean {
 }
 
 const JOB_FILE_RE =
-  /^(?:(?:input|input-distorted)\.(?:jpg|jpeg|svg)|input-distorted-preview\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
+  /^(?:(?:input|input-distorted)\.(?:jpg|jpeg|svg)|input-distorted-preview\.jpe?g|pole-caps\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
 
 export function isAllowedJobFilename(name: string): boolean {
   return JOB_FILE_RE.test(name);

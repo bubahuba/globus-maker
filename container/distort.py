@@ -4,14 +4,18 @@ Primary paths use svg_warp / slize.pl for stripes. This module still provides:
 - ImageMagick BarrelInverse for JPEG prewarp
 - SVG→JPEG rasterization
 - Sphere preview: DePolar unwrap of the stitched map (equirect for WebGL)
+- Pole caps sheet: north (prewarped centre) + empty-fill south, white outside
 """
 
 from __future__ import annotations
 
+import math
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from svg_warp import NONA_MID_EDGE_Y_FRAC
 
 # Center-compress for stereographic compensation.
 # ImageMagick BarrelInverse samples: Rsrc = Rd / (A*Rd^3 + B*Rd^2 + C*Rd + D);
@@ -21,6 +25,52 @@ JPEG_QUALITY = 98
 
 # Sphere WebGL preview — keep under typical browser/decode limits.
 SPHERE_PREVIEW_MAX_EDGE = 6000
+
+# Print scale matches BE ``stripeHeightPx = diameterCm × 160``.
+PRINT_PX_PER_CM = 160.0
+# Physical circular cover diameter glued over converging stripe tips.
+POLE_CAP_DIAMETER_CM = 5.0
+# Cap imagery is slightly larger than the 1:1 prewarp→stripe match for glue overlap.
+POLE_CAP_ENLARGE = 1.06
+
+
+def pole_cap_source_radius_px(
+    map_size: float,
+    globe_diameter_cm: float,
+    *,
+    cap_diameter_cm: float = POLE_CAP_DIAMETER_CM,
+    enlarge: float = POLE_CAP_ENLARGE,
+    mid_edge_y_frac: float = NONA_MID_EDGE_Y_FRAC,
+) -> float:
+    """Radius in the prewarped square for a printed cap of ``cap_diameter_cm``.
+
+    Near the map centre, ``nona``/stripe unwrap is approximately linear:
+    ``y_frac ≈ (r / r_mid) * mid_edge_y_frac``. Printed stripe height equals
+    ``globe_diameter_cm`` at ``PRINT_PX_PER_CM``, so a physical distance ``d`` cm
+    from the tip corresponds to source radius
+    ``r = r_mid * d / (mid_edge_y_frac * globe_diameter_cm)``.
+
+    ``enlarge > 1`` takes a slightly smaller source disk so the printed cap is
+    magnified relative to the prewarped map (easier physical overlap).
+    """
+    if map_size <= 0 or globe_diameter_cm <= 0 or cap_diameter_cm <= 0:
+        raise ValueError("map_size, globe_diameter_cm, and cap_diameter_cm must be positive")
+    if enlarge <= 0:
+        raise ValueError("enlarge must be positive")
+    if mid_edge_y_frac <= 0:
+        raise ValueError("mid_edge_y_frac must be positive")
+
+    r_mid = map_size / 2.0
+    match_cm = (cap_diameter_cm / 2.0) / enlarge
+    src_r = r_mid * match_cm / (mid_edge_y_frac * globe_diameter_cm)
+    return min(src_r, r_mid)
+
+
+def pole_cap_output_side_px(cap_diameter_cm: float = POLE_CAP_DIAMETER_CM) -> int:
+    """Square JPEG side length at the same print DPI as the stripes."""
+    if cap_diameter_cm <= 0:
+        raise ValueError("cap_diameter_cm must be positive")
+    return max(1, int(round(cap_diameter_cm * PRINT_PX_PER_CM)))
 
 
 def _magick_bin() -> str:
@@ -53,6 +103,12 @@ def rasterize_svg(
             "-background",
             background_color,
             str(svg_path),
+            "-background",
+            background_color,
+            "-alpha",
+            "remove",
+            "-alpha",
+            "off",
             "-resize",
             f"{max_edge}x{max_edge}>",
             "-quality",
@@ -128,6 +184,135 @@ def _identify_size(image_path: Path) -> tuple[int, int]:
     if len(parts) != 2:
         raise RuntimeError(f"Unexpected identify output: {result.stdout!r}")
     return int(parts[0]), int(parts[1])
+
+
+def pole_caps_canvas_size_px(
+    cap_diameter_cm: float = POLE_CAP_DIAMETER_CM,
+    *,
+    gap_px: int | None = None,
+) -> tuple[int, int]:
+    """Width × height of the two-circle pole-caps sheet (side by side on white)."""
+    side = pole_cap_output_side_px(cap_diameter_cm)
+    gap = max(0, int(round(0.25 * PRINT_PX_PER_CM)) if gap_px is None else gap_px)
+    return side * 2 + gap, side
+
+
+def build_pole_caps(
+    image_path: Path,
+    dest: Path,
+    *,
+    diameter_cm: float,
+    cap_diameter_cm: float = POLE_CAP_DIAMETER_CM,
+    enlarge: float = POLE_CAP_ENLARGE,
+    quality: int = JPEG_QUALITY,
+    empty_fill: str = "#e8eddb",
+) -> Path:
+    """One JPEG with two equal circles on a white sheet.
+
+    Left: north pole — circular crop of the prewarped map centre, print-scaled
+    to the stripe tips (slightly enlarged via ``enlarge`` for glue overlap).
+    Right: south pole — same diameter, solid ``empty_fill`` only.
+    Outside both circle masks is white.
+    """
+    image_path = Path(image_path)
+    dest = Path(dest)
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Missing image for pole caps: {image_path}")
+
+    width, height = _identify_size(image_path)
+    map_size = float(min(width, height))
+    src_r = pole_cap_source_radius_px(
+        map_size,
+        diameter_cm,
+        cap_diameter_cm=cap_diameter_cm,
+        enlarge=enlarge,
+    )
+    # Even crop side so the circle centre lands on a pixel.
+    crop = max(2, int(math.ceil(src_r * 2.0)))
+    if crop % 2:
+        crop += 1
+    crop = min(crop, int(map_size) if int(map_size) % 2 == 0 else int(map_size) - 1)
+    crop = max(2, crop)
+    cx = cy = (crop - 1) / 2.0
+    # Draw radius reaches the mid-edge of the square crop.
+    draw_r = crop / 2.0 - 0.5
+    out_side = pole_cap_output_side_px(cap_diameter_cm)
+    gap = max(0, int(round(0.25 * PRINT_PX_PER_CM)))
+    out_cx = out_cy = (out_side - 1) / 2.0
+    out_draw_r = out_side / 2.0 - 0.5
+
+    magick = _magick_bin()
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, dir=dest.parent) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        # North: map centre → circle, white outside.
+        # South: empty-fill circle of the same output size, white outside.
+        # Append horizontally with a white gap.
+        cmd = [
+            magick,
+            "(",
+            str(image_path),
+            "-gravity",
+            "Center",
+            "-crop",
+            f"{crop}x{crop}+0+0",
+            "+repage",
+            "(",
+            "-size",
+            f"{crop}x{crop}",
+            "xc:Black",
+            "-fill",
+            "White",
+            "-draw",
+            f"circle {cx},{cy} {cx + draw_r},{cy}",
+            ")",
+            "-alpha",
+            "off",
+            "-compose",
+            "CopyOpacity",
+            "-composite",
+            "-background",
+            "White",
+            "-alpha",
+            "remove",
+            "-alpha",
+            "off",
+            "-resize",
+            f"{out_side}x{out_side}!",
+            ")",
+            "(",
+            "-size",
+            f"{gap}x{out_side}",
+            "xc:White",
+            ")",
+            "(",
+            "-size",
+            f"{out_side}x{out_side}",
+            "xc:White",
+            "-fill",
+            empty_fill,
+            "-draw",
+            f"circle {out_cx},{out_cy} {out_cx + out_draw_r},{out_cy}",
+            ")",
+            "+append",
+            "-quality",
+            str(quality),
+            str(tmp_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not tmp_path.is_file() or tmp_path.stat().st_size <= 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+            raise RuntimeError(f"ImageMagick pole caps failed: {detail}")
+        tmp_path.replace(dest)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+    if not dest.is_file() or dest.stat().st_size <= 0:
+        raise RuntimeError("Pole caps produced an empty file")
+    return dest
 
 
 def build_stripe_sphere_preview(
@@ -236,11 +421,21 @@ def build_depolar_sphere_preview(
             f"{work_edge}x{work_edge}>",
             "-background",
             background_color,
+            "-alpha",
+            "remove",
+            "-alpha",
+            "off",
             "-virtual-pixel",
             "Background",
             "-distort",
             "DePolar",
             "-1",
+            "-background",
+            background_color,
+            "-alpha",
+            "remove",
+            "-alpha",
+            "off",
             "-resize",
             f"{out_w}x{out_h}!",
             "-quality",

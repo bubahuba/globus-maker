@@ -39,5 +39,5 @@ Skills in `.cursor/skills/` (load when relevant):
 - Stripe height: `diameterCm × 160` px (Globe); Map uses `squareSidePx` (500–10000)
 - Keep `BE/src/types.ts` and `FE/src/lib/types.ts` aligned
 - Map layers: single source in `shared/map-style.ts`
-- Always stitch via SVG tiles (`input.svg`). Map: zip `input.svg`/`input.jpg` only. Globe: sphere DePolar from `input.svg`; prewarp → `input-distorted.svg` + `slize.pl` → `out-*.jpg`
+- Always stitch via SVG tiles (`input.svg`). Map: zip `input.svg`/`input.jpg` only. Globe: sphere DePolar from `input.svg`; prewarp → `input-distorted.svg` + `pole-caps.jpg` + `slize.pl` → `out-*.jpg`
 - Run `npm test` after `tile-math.ts` changes
