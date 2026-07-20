@@ -58,6 +58,17 @@ export function downloadUrl(jobId: string): string {
 	return `/api/jobs/${jobId}/download`;
 }
 
+async function triggerBrowserDownload(blob: Blob, filename: string): Promise<void> {
+	const objectUrl = URL.createObjectURL(blob);
+	const anchor = document.createElement('a');
+	anchor.href = objectUrl;
+	anchor.download = filename;
+	document.body.appendChild(anchor);
+	anchor.click();
+	anchor.remove();
+	URL.revokeObjectURL(objectUrl);
+}
+
 /** Fetch zip, trigger browser save, then resolve (server purges artifacts after download). */
 export async function downloadJobZip(jobId: string, filename?: string | null): Promise<void> {
 	const response = await fetch(downloadUrl(jobId));
@@ -65,15 +76,30 @@ export async function downloadJobZip(jobId: string, filename?: string | null): P
 		const body = (await response.json().catch(() => null)) as { error?: string } | null;
 		throw new Error(body?.error || `Download failed (${response.status})`);
 	}
-	const blob = await response.blob();
-	const objectUrl = URL.createObjectURL(blob);
-	const anchor = document.createElement('a');
-	anchor.href = objectUrl;
-	anchor.download = filename?.trim() || 'globus-stripes.zip';
-	document.body.appendChild(anchor);
-	anchor.click();
-	anchor.remove();
-	URL.revokeObjectURL(objectUrl);
+	await triggerBrowserDownload(await response.blob(), filename?.trim() || 'globus-stripes.zip');
+}
+
+/** Map SVG filename derived from a globe zip name (`place-25cm.zip` → `place.svg`). */
+export function mapSvgFilenameFromZip(zipName?: string | null): string {
+	const name = zipName?.trim();
+	if (!name) return 'map.svg';
+	return name.replace(/-\d+(\.\d+)?cm\.zip$/i, '.svg').replace(/\.zip$/i, '.svg');
+}
+
+/**
+ * Download the stitched square map SVG only (preview file).
+ * Does not hit `/download`, so the server keeps zip + previews.
+ */
+export async function downloadJobMapSvg(jobId: string, filename?: string | null): Promise<void> {
+	const response = await fetch(jobFileUrl(jobId, 'input.svg'));
+	if (!response.ok) {
+		const body = (await response.json().catch(() => null)) as { error?: string } | null;
+		throw new Error(body?.error || `Map SVG download failed (${response.status})`);
+	}
+	await triggerBrowserDownload(
+		await response.blob(),
+		filename?.trim() || mapSvgFilenameFromZip(null)
+	);
 }
 
 export function jobFileUrl(jobId: string, filename: string, cacheBust?: string | number): string {

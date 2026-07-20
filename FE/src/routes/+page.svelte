@@ -86,6 +86,7 @@
 	let jobError = $state<string | null>(null);
 	let jobFiles = $state<string[]>([]);
 	let artifactsAvailable = $state(true);
+	let jobPaid = $state(false);
 	let jobUpdatedAt = $state<string | null>(null);
 	let jobManifest = $state<CreateJobResponse['manifest'] | null>(null);
 	let jobStepCurrent = $state<number | undefined>(undefined);
@@ -135,6 +136,7 @@
 		jobQueueLength = job.queueLength;
 		jobFiles = job.files ?? [];
 		artifactsAvailable = job.artifactsAvailable !== false;
+		jobPaid = job.paid === true;
 		if (job.updatedAt) jobUpdatedAt = job.updatedAt;
 		if (job.downloadFilename) downloadFilename = job.downloadFilename;
 		else if (job.status === 'complete' && !artifactsAvailable) downloadFilename = null;
@@ -374,6 +376,7 @@
 		jobFiles = [];
 		jobMode = mode;
 		artifactsAvailable = true;
+		jobPaid = false;
 		jobUpdatedAt = null;
 		downloadFilename = null;
 		jobManifest = estimateToManifest();
@@ -448,6 +451,10 @@
 						queueLength={jobQueueLength}
 						{downloadFilename}
 						{artifactsAvailable}
+						paid={jobPaid}
+						onpaid={() => {
+							jobPaid = true;
+						}}
 						ondownloaded={() => {
 							artifactsAvailable = false;
 							jobFiles = [];

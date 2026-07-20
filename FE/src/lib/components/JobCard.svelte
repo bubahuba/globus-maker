@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { downloadJobZip } from '@lib/api/jobs';
+	import { downloadJobMapSvg, downloadJobZip, mapSvgFilenameFromZip } from '@lib/api/jobs';
+	import PaypalCheckoutDialog from '@lib/components/PaypalCheckoutDialog.svelte';
 	import type { CreateJobResponse, JobMode, JobStatus, StepUnit } from '@lib/types';
 	import { clampTileZoom } from '@shared/tile-constants';
 
@@ -50,6 +51,9 @@
 		downloadFilename?: string | null;
 		/** False after zip was downloaded or server TTL purged files. */
 		artifactsAvailable?: boolean;
+		/** Globe zip unlocked after PayPal capture. */
+		paid?: boolean;
+		onpaid?: () => void;
 		ondownloaded?: () => void;
 	}
 
@@ -68,19 +72,50 @@
 		queueLength,
 		downloadFilename = null,
 		artifactsAvailable = true,
+		paid = false,
+		onpaid,
 		ondownloaded
 	}: Props = $props();
 
 	let downloading = $state(false);
 	let downloadError = $state<string | null>(null);
+	let paypalDialogOpen = $state(false);
 
-	async function onDownloadClick() {
+	function onDownloadClick() {
+		if (!jobId || downloading) return;
+		if (mode === 'globe' && !paid) {
+			paypalDialogOpen = true;
+			return;
+		}
+		void runDownload();
+	}
+
+	async function runDownload() {
 		if (!jobId || downloading) return;
 		downloading = true;
 		downloadError = null;
 		try {
 			await downloadJobZip(jobId, downloadFilename);
 			ondownloaded?.();
+		} catch (err) {
+			downloadError = err instanceof Error ? err.message : 'Download failed';
+		} finally {
+			downloading = false;
+		}
+	}
+
+	async function runPaidDownload() {
+		onpaid?.();
+		await runDownload();
+	}
+
+	/** Free path: stitched map SVG only; leave zip/previews on the server. */
+	async function runFreeMapSvgDownload() {
+		if (!jobId || downloading) return;
+		downloading = true;
+		downloadError = null;
+		try {
+			await downloadJobMapSvg(jobId, mapSvgFilenameFromZip(downloadFilename));
 		} catch (err) {
 			downloadError = err instanceof Error ? err.message : 'Download failed';
 		} finally {
@@ -380,3 +415,13 @@
 		</p>
 	{/if}
 </div>
+
+{#if mode === 'globe' && jobId && !paid}
+	<PaypalCheckoutDialog
+		bind:open={paypalDialogOpen}
+		{jobId}
+		filename={downloadFilename}
+		ondownload={runPaidDownload}
+		onfreeDownload={runFreeMapSvgDownload}
+	/>
+{/if}

@@ -1,1 +1,11 @@
 PROCESSOR_URL=http://localhost:8080
+API_CALLBACK_ORIGIN=http://host.docker.internal:8787
+
+# PayPal Checkout (sandbox) — copy values from `.env`
+PAYPAL_MODE=sandbox
+USER_PAYPAL=
+PASS_PAYPAL=
+PAYPAL_CLIENT_ID=
+PAYPAL_CLIENT_SECRET=
+PAYPAL_CURRENCY=EUR
+PAYPAL_AMOUNT=5

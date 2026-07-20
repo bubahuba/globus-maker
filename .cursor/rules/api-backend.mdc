@@ -24,7 +24,10 @@ alwaysApply: false
 | `POST /api/jobs/:id/cancel` | Cancel (beacon-friendly) |
 | `PUT /api/jobs/:id/files/:name` | Processor uploads preview SVG/JPEG |
 | `GET /api/jobs/:id/files/:name` | Serve preview SVG/JPEG |
-| `GET /api/jobs/:id/download` | Download zip |
+| `GET /api/jobs/:id/download` | Download zip (globe requires `paid`) |
+| `GET /api/paypal/config` | Public PayPal client id / amount |
+| `POST /api/paypal/orders` | Create PayPal order for globe zip |
+| `POST /api/paypal/orders/:orderId/capture` | Capture + unlock globe zip |
 | `GET /api/geocode?q=` | Nominatim proxy |
 
 ## Processor dispatch

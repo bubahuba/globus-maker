@@ -21,6 +21,7 @@ import {
   getJob,
   isAllowedJobFilename,
   isTerminalStatus,
+  markJobPaid,
   saveJob,
   updateJobProgress,
 } from "./jobs/store";
@@ -31,6 +32,8 @@ import {
   putArtifact,
 } from "./jobs/artifacts";
 import { jobZipFilename } from "./jobs/filename";
+import { captureGlobeDownloadOrder, createGlobeDownloadOrder } from "./paypal/client";
+import { publicPaypalConfig } from "./paypal/config";
 
 const DEV_ORIGINS = [
   "http://localhost:5173",
@@ -322,6 +325,7 @@ app.get("/api/jobs/:id", async (c) => {
     queueLength: job.queueLength,
     files: job.files ?? [],
     artifactsAvailable: hasArtifacts,
+    paid: job.paid === true,
     updatedAt: job.updatedAt,
     downloadUrl: canDownload ? `/api/jobs/${job.id}/download` : null,
     downloadFilename: canDownload ? downloadFilename : null,
@@ -420,13 +424,17 @@ app.get("/api/jobs/:id/download", async (c) => {
     return c.json({ error: "Artifacts already removed" }, 410);
   }
 
+  const mode = normalizeJobMode(job.request.mode);
+  if (mode === "globe" && job.paid !== true) {
+    return c.json({ error: "Payment required for globe zip download" }, 402);
+  }
+
   const zipBytes = await getArtifact(c.env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
   if (!zipBytes) {
     await purgeJobArtifacts(c.env.ARTIFACTS, job.id);
     return c.json({ error: "Artifact missing" }, 404);
   }
 
-  const mode = normalizeJobMode(job.request.mode);
   const filename = jobZipFilename({ ...job.request, mode });
   const headers = new Headers();
   headers.set("Content-Type", "application/zip");
@@ -437,6 +445,83 @@ app.get("/api/jobs/:id/download", async (c) => {
   c.executionCtx.waitUntil(purgeJobArtifacts(c.env.ARTIFACTS, job.id));
 
   return new Response(zipBytes, { headers });
+});
+
+app.get("/api/paypal/config", (c) => {
+  return c.json(publicPaypalConfig(c.env));
+});
+
+app.post("/api/paypal/orders", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { jobId?: string } | null;
+  const jobId = body?.jobId?.trim();
+  if (!jobId) return c.json({ error: "jobId is required" }, 400);
+
+  const job = await getJob(c.env.ARTIFACTS, jobId);
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (job.status !== "complete") return c.json({ error: "Job not complete" }, 409);
+  if (normalizeJobMode(job.request.mode) !== "globe") {
+    return c.json({ error: "PayPal checkout is only for globe downloads" }, 400);
+  }
+  if (job.artifactsAvailable === false) {
+    return c.json({ error: "Artifacts already removed" }, 410);
+  }
+  if (job.paid === true) {
+    return c.json({ id: job.paypalOrderId ?? "already-paid", alreadyPaid: true });
+  }
+
+  try {
+    const order = await createGlobeDownloadOrder(c.env, jobId);
+    return c.json(order);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "PayPal create order failed";
+    console.error("[paypal] create order:", message);
+    return c.json({ error: message }, 502);
+  }
+});
+
+app.post("/api/paypal/orders/:orderId/capture", async (c) => {
+  const orderId = c.req.param("orderId");
+  const body = (await c.req.json().catch(() => null)) as { jobId?: string } | null;
+  const expectedJobId = body?.jobId?.trim();
+
+  try {
+    const result = await captureGlobeDownloadOrder(c.env, orderId);
+    const jobId = result.jobId || expectedJobId;
+    if (!jobId) {
+      return c.json({ error: "Capture succeeded but job id missing" }, 502);
+    }
+    if (expectedJobId && result.jobId && expectedJobId !== result.jobId) {
+      return c.json({ error: "Order job mismatch" }, 409);
+    }
+    if (result.status !== "COMPLETED") {
+      return c.json({ error: `Payment not completed (${result.status})` }, 402);
+    }
+
+    const job = await getJob(c.env.ARTIFACTS, jobId);
+    if (!job) return c.json({ error: "Job not found" }, 404);
+    if (normalizeJobMode(job.request.mode) !== "globe") {
+      return c.json({ error: "PayPal checkout is only for globe downloads" }, 400);
+    }
+
+    const paid = await markJobPaid(c.env.ARTIFACTS, jobId, {
+      orderId: result.orderId,
+      captureId: result.captureId,
+    });
+    if (!paid) return c.json({ error: "Failed to unlock download" }, 500);
+
+    return c.json({
+      ok: true,
+      status: result.status,
+      orderId: result.orderId,
+      captureId: result.captureId,
+      jobId,
+      paid: true,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "PayPal capture failed";
+    console.error("[paypal] capture:", message);
+    return c.json({ error: message }, 502);
+  }
 });
 
 app.get("/api/geocode", async (c) => {

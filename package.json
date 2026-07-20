@@ -4,7 +4,7 @@
   "scripts": {
     "install:all": "npm install --prefix FE && npm install",
     "dev": "bash scripts/dev.sh",
-    "dev:api": "tsx watch --clear-screen=false BE/src/dev-server.ts",
+    "dev:api": "tsx watch --env-file=.env --env-file=.dev.vars --clear-screen=false BE/src/dev-server.ts",
     "dev:fe": "npm run dev --prefix FE",
     "dev:processor": "docker compose up --build processor",
     "dev:cf": "npm run build:fe && npx wrangler dev",

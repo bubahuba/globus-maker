@@ -94,6 +94,8 @@ export interface JobResponse {
 	files?: string[];
 	/** False after download or TTL purge — zip/previews removed from the server. */
 	artifactsAvailable?: boolean;
+	/** Globe zip unlocked after PayPal capture. */
+	paid?: boolean;
 	/** Bumps when progress/files change — use to cache-bust preview URLs. */
 	updatedAt?: string;
 	downloadUrl?: string | null;

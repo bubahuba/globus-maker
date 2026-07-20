@@ -10,3 +10,11 @@ dist/
 *.zip
 *.jpg
 *.pto
+
+# Secrets / local env (keep *.example committed)
+.env
+.env.*
+!.env.example
+FE/.env
+FE/.env.*
+!FE/.env.example

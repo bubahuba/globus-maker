@@ -131,3 +131,21 @@ export async function addJobFile(
   await saveJob(bucket, job);
   return job;
 }
+
+/** Mark a globe job as paid after a successful PayPal capture. */
+export async function markJobPaid(
+  bucket: R2Bucket | undefined,
+  id: string,
+  payment: { orderId: string; captureId?: string },
+): Promise<JobRecord | null> {
+  const job = await getJob(bucket, id);
+  if (!job) return null;
+
+  job.paid = true;
+  job.paidAt = new Date().toISOString();
+  job.paypalOrderId = payment.orderId;
+  if (payment.captureId) job.paypalCaptureId = payment.captureId;
+  job.updatedAt = job.paidAt;
+  await saveJob(bucket, job);
+  return job;
+}

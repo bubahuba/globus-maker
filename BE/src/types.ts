@@ -86,6 +86,11 @@ export interface JobRecord {
    * Undefined/true means artifacts may still be available.
    */
   artifactsAvailable?: boolean;
+  /** Globe zip unlocked after successful PayPal capture. */
+  paid?: boolean;
+  paidAt?: string;
+  paypalOrderId?: string;
+  paypalCaptureId?: string;
   createdAt: string;
   updatedAt: string;
   request: JobRequest;

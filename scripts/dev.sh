@@ -28,6 +28,12 @@ fi
 
 # shellcheck disable=SC1091
 set -a
+# Prefer `.env` (sandbox) when present, then `.dev.vars` overrides for local paths.
+if [[ -f "$ROOT/.env" ]]; then
+	# shellcheck disable=SC1091
+	source "$ROOT/.env"
+fi
+# shellcheck disable=SC1091
 source "$ROOT/.dev.vars"
 set +a
 
@@ -57,7 +63,8 @@ fi
 
 echo "==> Starting API on http://localhost:8787"
 # Watch mode reloads when BE/shared imports change (plain tsx keeps a stale module graph).
-npx tsx watch --clear-screen=false "$ROOT/BE/src/dev-server.ts" &
+# --env-file loads PayPal sandbox credentials from .env / .dev.vars.
+npx tsx watch --env-file="$ROOT/.env" --env-file="$ROOT/.dev.vars" --clear-screen=false "$ROOT/BE/src/dev-server.ts" &
 
 echo "==> Starting frontend on http://localhost:5173"
 npm run dev --prefix "$ROOT/FE" &

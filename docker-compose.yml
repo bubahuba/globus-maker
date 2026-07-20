@@ -5,6 +5,9 @@ services:
       - "8080:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Loads USER_PAYPAL / PASS_PAYPAL / PAYPAL_* from root `.env`.
+    env_file:
+      - .env
     environment:
       - PORT=8080
       - WORK_DIR=/tmp/globus-jobs
