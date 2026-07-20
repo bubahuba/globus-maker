@@ -23,15 +23,14 @@ Always:
 **Map mode** (`mode: "map"`):
 
 2. Optional: rasterize SVG → `input.jpg` when `outputFormat` is jpg
-3. Zip `input.svg` or `input.jpg` → return (no prewarp / stripes)
+3. Zip `input.svg` or `input.jpg` → return (no prewarp, no stripes)
 
 **Globe mode** (`mode: "globe"`):
 
-2. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg`
-3. Rasterize prewarped SVG → `input-distorted.jpg`
-4. DePolar sphere preview JPEG for UI
-5. `slize.pl` → `out-*.jpg` stripes
-6. Zip `input.svg` + `input-distorted.svg` + stripe JPGs → return
+2. DePolar sphere preview from `input.svg` → `input-distorted-preview.jpg`
+3. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg` + raster `input-distorted.jpg`
+4. `slize.pl` → `out-*.jpg` stripes
+5. Zip `input.svg` + `input-distorted.svg` + stripe JPGs → return
 
 Legacy bitmap helpers (`tile_render.py` Pillow path, `stitch.py`, `distort.spherical_prewarp`, SVG `project_all_stripes`) remain for tests but are not used by `process_job`.
 

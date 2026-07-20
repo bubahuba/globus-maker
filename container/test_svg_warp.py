@@ -129,8 +129,8 @@ def math_cos(deg: float) -> float:
 def test_stripe_svg_fills_viewbox_not_lentil() -> None:
     """Projected content should span most of the rectangular stripe, not a tiny lentil."""
     svg = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <rect data-bg="1" x="0" y="0" width="200" height="200" fill="#e8eddb"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
+     style="background:#e8eddb">
   <path d="M100,100 L100,10 L110,20 L90,20 Z" fill="#09f"/>
   <path d="M100,100 L190,100 L180,110 L180,90 Z" fill="#f90"/>
 </svg>
@@ -155,8 +155,8 @@ def test_stripe_svg_fills_viewbox_not_lentil() -> None:
 
 def test_warp_svg_barrel_rewrites_path() -> None:
     svg = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect data-bg="1" x="0" y="0" width="100" height="100" fill="#e8eddb"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
+     style="background:#e6d5a8" data-land-fill="#e8eddb">
   <path d="M50,10 L55,10 L55,15 L50,15 Z" fill="#00f"/>
 </svg>
 """
@@ -169,6 +169,21 @@ def test_warp_svg_barrel_rewrites_path() -> None:
         assert "<svg" in text
         assert 'd="' in text
         assert "M50,10" not in text or "L55,10" not in text
+        # Prewarped canvas must use base fill, not land color.
+        assert "background:#e6d5a8" in text
+        import xml.etree.ElementTree as ET
+
+        root = ET.parse(dest).getroot()
+        land = next(
+            (
+                c
+                for c in root
+                if c.tag.split("}")[-1] == "path" and c.attrib.get("data-land") == "1"
+            ),
+            None,
+        )
+        assert land is not None
+        assert land.attrib.get("fill") == "#e6d5a8"
 
 
 def test_stripe_projection_updates_text_rotate_center() -> None:
@@ -178,8 +193,8 @@ def test_stripe_projection_updates_text_rotate_center() -> None:
     # Label inside stripe-0 gore (near top mid, ~bearing 0°) with a street angle.
     # svg_map stores rotate(-street_angle, x, y).
     svg = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <rect data-bg="1" x="0" y="0" width="200" height="200" fill="#e8eddb"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
+     style="background:#e8eddb">
   <text x="105" y="80" font-size="8" fill="#333"
         transform="rotate(-35 105 80)">Teststraat</text>
 </svg>
@@ -226,8 +241,8 @@ def test_stripe_keeps_land_over_basefill_with_arc_rim() -> None:
     import xml.etree.ElementTree as ET
 
     svg = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <rect data-bg="1" x="0" y="0" width="200" height="200" fill="#e8eddb"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"
+     style="background:#e6d5a8" data-land-fill="#e8eddb">
   <path d="M100,100 L100,20 L120,40 L80,40 Z" fill="#333"/>
 </svg>
 """

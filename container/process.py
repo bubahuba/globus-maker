@@ -138,27 +138,36 @@ async def upload_sphere_preview_from_map(
     *,
     background_color: str = "#e8eddb",
 ) -> bool:
-    """DePolar-unwrap the centre-north map and upload for the globe viewer.
+    """DePolar-unwrap the stitched square map (``input.svg``) for the globe viewer.
 
-    A continuous equirect from the prewarped map looks much better at the
-    north pole than a side-by-side montage of stripe gores.
+    Applies ``background_color`` (empty fill) as the SVG root background so empty
+    areas on the sphere match stripe empty-space coloring.
     """
     if not source.is_file():
         return False
     preview = work_dir / SPHERE_PREVIEW_NAME
     raster_tmp: Path | None = None
+    sphere_svg: Path | None = None
     try:
         map_source = source
         if source.suffix.lower() == ".svg":
+            sphere_svg = work_dir / "_sphere_basefill.svg"
+            await asyncio.to_thread(
+                _apply_svg_base_fill,
+                source,
+                sphere_svg,
+                background_color,
+            )
             raster_tmp = work_dir / "_sphere_src.jpg"
             await asyncio.to_thread(
                 rasterize_svg,
-                source,
+                sphere_svg,
                 raster_tmp,
                 max_edge=SPHERE_PREVIEW_MAX_EDGE,
                 background_color=background_color,
             )
             map_source = raster_tmp
+
         await asyncio.to_thread(
             build_depolar_sphere_preview,
             map_source,
@@ -172,10 +181,26 @@ async def upload_sphere_preview_from_map(
     finally:
         if raster_tmp is not None:
             raster_tmp.unlink(missing_ok=True)
+        if sphere_svg is not None:
+            sphere_svg.unlink(missing_ok=True)
     ok = await upload_job_file(callback_url, preview)
     if not ok:
         print(f"[globus] sphere preview upload failed ({SPHERE_PREVIEW_NAME})", flush=True)
     return ok
+
+
+def _apply_svg_base_fill(src: Path, dest: Path, fill: str) -> Path:
+    """Copy SVG and set the root ``style="background:…"`` to the base-fill color."""
+    import xml.etree.ElementTree as ET
+
+    from svg_warp import set_svg_background
+
+    tree = ET.parse(src)
+    root = tree.getroot()
+    set_svg_background(root, fill)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(dest, encoding="utf-8", xml_declaration=True)
+    return dest
 
 
 async def run_slize(
@@ -421,6 +446,34 @@ async def _package_and_finish(
     return zip_path
 
 
+async def _prewarp_for_stripes(
+    work_dir: Path,
+    input_svg: Path,
+    *,
+    callback_url: str | None,
+    cancel_event: asyncio.Event | None,
+    base_fill: str,
+    raster_max_edge: int,
+) -> Path:
+    """BarrelInverse prewarp + full-res JPEG for ``slize.pl`` (globe / stripes only)."""
+    input_distorted_svg = work_dir / INPUT_DISTORTED_SVG
+
+    _ensure_not_cancelled(cancel_event)
+    await asyncio.to_thread(warp_svg_barrel, input_svg, input_distorted_svg)
+    await upload_job_file(callback_url, input_distorted_svg)
+
+    _ensure_not_cancelled(cancel_event)
+    input_distorted_jpg = work_dir / INPUT_DISTORTED_JPG
+    await asyncio.to_thread(
+        rasterize_svg,
+        input_distorted_svg,
+        input_distorted_jpg,
+        max_edge=raster_max_edge,
+        background_color=base_fill,
+    )
+    return input_distorted_jpg
+
+
 async def _process_job_map(
     payload: dict,
     work_dir: Path,
@@ -493,27 +546,21 @@ async def _process_job_globe(
         payload.get("manifest", {}).get("targetOutputPx") or stripe_height_px or SPHERE_PREVIEW_MAX_EDGE
     )
 
-    input_distorted_svg = work_dir / INPUT_DISTORTED_SVG
-    input_distorted_jpg = work_dir / INPUT_DISTORTED_JPG
-
-    _ensure_not_cancelled(cancel_event)
-    await asyncio.to_thread(warp_svg_barrel, input_svg, input_distorted_svg)
-    await upload_job_file(callback_url, input_distorted_svg)
-
-    _ensure_not_cancelled(cancel_event)
-    await asyncio.to_thread(
-        rasterize_svg,
-        input_distorted_svg,
-        input_distorted_jpg,
-        max_edge=max(target_px, stripe_height_px),
-        background_color=base_fill,
-    )
-
+    # Sphere overview uses the stitched square map (not the prewarped SVG).
     await upload_sphere_preview_from_map(
         callback_url,
         work_dir,
-        input_distorted_jpg,
+        input_svg,
         background_color=base_fill,
+    )
+
+    input_distorted_jpg = await _prewarp_for_stripes(
+        work_dir,
+        input_svg,
+        callback_url=callback_url,
+        cancel_event=cancel_event,
+        base_fill=base_fill,
+        raster_max_edge=max(target_px, stripe_height_px),
     )
 
     _ensure_not_cancelled(cancel_event)

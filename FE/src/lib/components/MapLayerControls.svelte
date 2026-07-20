@@ -2,12 +2,13 @@
 	import {
 		createDefaultMapLayers,
 		getBaseFillLayer,
-		isBaseFillLayer,
+		getLandFillLayer,
 		layerZoomHint,
 		MAP_LAYER_GROUPS,
+		MAP_LAYER_KEYS,
 		MAP_LAYER_LABELS,
 		withBaseFillLayer,
-		type BaseFillLayer,
+		withLandFillLayer,
 		type MapLayerKey,
 		type MapLayerStyle
 	} from '@shared/map-style';
@@ -18,7 +19,8 @@
 
 	let { value = $bindable(createDefaultMapLayers()) }: Props = $props();
 
-	const baseFill = $derived(getBaseFillLayer(value));
+	const emptyFill = $derived(getBaseFillLayer(value));
+	const landFill = $derived(getLandFillLayer(value));
 
 	function updateColor(key: MapLayerKey, color: string) {
 		value = {
@@ -27,12 +29,15 @@
 		};
 	}
 
-	function selectBaseFill(key: BaseFillLayer) {
-		value = withBaseFillLayer(value, key);
+	function selectEmptyFill(key: string) {
+		value = withBaseFillLayer(value, key as MapLayerKey);
+	}
+
+	function selectLandFill(key: string) {
+		value = withLandFillLayer(value, key as MapLayerKey);
 	}
 
 	function onVisibilityToggle(key: MapLayerKey, checked: boolean) {
-		if (isBaseFillLayer(key)) return;
 		value = {
 			...value,
 			[key]: { ...value[key], enabled: checked }
@@ -44,55 +49,76 @@
 	<div class="space-y-1">
 		<h3 class="text-sm font-medium text-stone-900">Map layers</h3>
 		<p class="text-xs text-stone-500">
-			Land and water stay on the map always. Their checkboxes only choose which color fills empty
-			stripe space — exactly one must be selected (default: land). Other groups can be hidden or
-			recolored. Labels include places, water, parks, and street names at progressive zoom levels.
+			Empty fill is stripe gaps (and seas when Water is off). Base land fill is continents /
+			shore. Neither has to be a drawn layer.
 		</p>
 	</div>
+
+	<label class="block space-y-2 rounded-xl border border-stone-200 p-3">
+		<span class="text-sm font-medium text-stone-700">Empty fill</span>
+		<select
+			class="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 accent-amber-700"
+			value={emptyFill}
+			onchange={(event) => selectEmptyFill(event.currentTarget.value)}
+			aria-label="Empty fill layer"
+		>
+			{#each MAP_LAYER_KEYS as key (key)}
+				<option value={key}>{MAP_LAYER_LABELS[key]}</option>
+			{/each}
+		</select>
+		<p class="text-xs text-stone-400">
+			Stripe / projection empty space. When Water is off, seas use this color too (default: land).
+		</p>
+	</label>
+
+	<label class="block space-y-2 rounded-xl border border-stone-200 p-3">
+		<span class="text-sm font-medium text-stone-700">Base land fill</span>
+		<select
+			class="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 accent-amber-700"
+			value={landFill}
+			onchange={(event) => selectLandFill(event.currentTarget.value)}
+			aria-label="Base land fill layer"
+		>
+			{#each MAP_LAYER_KEYS as key (key)}
+				<option value={key}>{MAP_LAYER_LABELS[key]}</option>
+			{/each}
+		</select>
+		<p class="text-xs text-stone-400">
+			Map land color from the shore (preview background while land is on, open landcover, globe
+			silhouette).
+		</p>
+	</label>
 
 	{#each MAP_LAYER_GROUPS as group (group.id)}
 		<section class="space-y-2">
 			<h4 class="text-xs font-medium uppercase tracking-wide text-stone-400">{group.label}</h4>
 			{#each group.keys as key (key)}
 				{@const hint = layerZoomHint(key)}
-				{@const isBase = isBaseFillLayer(key)}
 				<div class="rounded-xl border border-stone-200 p-3">
 					<div class="flex items-center justify-between gap-3">
 						<label class="flex items-center gap-2 text-sm text-stone-700">
-							{#if isBase}
-								<input
-									type="checkbox"
-									checked={baseFill === key}
-									onchange={(event) => {
-										selectBaseFill(key);
-										// Clicking the active box unchecks it in the DOM; always keep
-										// the chosen base fill checked (XOR with the other).
-										event.currentTarget.checked = true;
-									}}
-									class="accent-amber-700"
-									aria-label="Use {MAP_LAYER_LABELS[key]} as base fill"
-								/>
-							{:else}
-								<input
-									type="checkbox"
-									checked={value[key].enabled}
-									onchange={(event) =>
-										onVisibilityToggle(
-											key,
-											(event.currentTarget as HTMLInputElement).checked
-										)}
-									class="accent-amber-700"
-								/>
-							{/if}
+							<input
+								type="checkbox"
+								checked={value[key].enabled}
+								onchange={(event) =>
+									onVisibilityToggle(
+										key,
+										(event.currentTarget as HTMLInputElement).checked
+									)}
+								class="accent-amber-700"
+							/>
 							{MAP_LAYER_LABELS[key]}
-							{#if isBase && baseFill === key}
-								<span class="text-xs font-normal text-amber-800">(base fill)</span>
+							{#if emptyFill === key}
+								<span class="text-xs font-normal text-amber-800">(empty fill)</span>
+							{/if}
+							{#if landFill === key}
+								<span class="text-xs font-normal text-amber-800">(land fill)</span>
 							{/if}
 						</label>
 						<input
 							type="color"
 							value={value[key].color}
-							disabled={!isBase && !value[key].enabled}
+							disabled={!value[key].enabled && emptyFill !== key && landFill !== key}
 							oninput={(event) =>
 								updateColor(key, (event.currentTarget as HTMLInputElement).value)}
 							class="h-8 w-12 cursor-pointer rounded border border-stone-300 bg-white p-0.5 disabled:cursor-not-allowed disabled:opacity-40"

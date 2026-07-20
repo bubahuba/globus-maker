@@ -29,6 +29,49 @@ _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 _PATH_CMD_RE = re.compile(
     rf"([MmLlHhVvCcSsQqTtAaZz])|({_NUM})"
 )
+_BG_COLOR_RE = re.compile(
+    r"(?:^|;)\s*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\))",
+    re.I,
+)
+
+
+def svg_background_color(root: ET.Element, default: str = "#e8eddb") -> str:
+    """Read canvas color from root ``style="background:…"`` (or legacy data-bg rect)."""
+    style = root.attrib.get("style") or ""
+    match = _BG_COLOR_RE.search(style)
+    if match:
+        return match.group(1).strip()
+    for child in list(root):
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "rect" and child.attrib.get("data-bg") == "1":
+            return child.attrib.get("fill") or default
+    return default
+
+
+def svg_land_fill_color(root: ET.Element, default: str = "#e8eddb") -> str:
+    """Land silhouette color: ``data-land-fill``, else legacy canvas/background."""
+    explicit = root.attrib.get("data-land-fill")
+    if explicit:
+        return explicit
+    return svg_background_color(root, default)
+
+
+def set_svg_background(root: ET.Element, fill: str) -> None:
+    """Set root SVG ``style="background:…"`` and drop a legacy data-bg rect if present."""
+    style = root.attrib.get("style") or ""
+    parts = [p.strip() for p in style.split(";") if p.strip()]
+    kept = [
+        p
+        for p in parts
+        if not p.lower().startswith("background:")
+        and not p.lower().startswith("background-color:")
+    ]
+    kept.insert(0, f"background:{fill}")
+    root.set("style", ";".join(kept))
+    for child in list(root):
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "rect" and child.attrib.get("data-bg") == "1":
+            root.remove(child)
 
 
 def parse_barrel_args(args: str | tuple[float, ...] = BARREL_INVERSE_ARGS) -> tuple[float, float, float, float]:
@@ -321,23 +364,48 @@ def _gore_land_silhouette_path(
     return "".join(parts)
 
 
-def _promote_bg_rect_to_land_path(root: ET.Element, map_size: float) -> str:
-    """Replace data-bg rect with a densified land path; return land fill color."""
-    land_fill = "#e8eddb"
+def _insert_square_fill_path(
+    root: ET.Element,
+    map_size: float,
+    fill: str,
+    *,
+    marker: str = "data-land",
+) -> str:
+    """Insert a full-square path (and drop legacy data-bg rect). Returns fill."""
+    insert_at = 0
     for child in list(root):
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-        if tag != "rect" or child.attrib.get("data-bg") != "1":
-            continue
-        land_fill = child.attrib.get("fill") or land_fill
-        land = ET.Element(f"{{{_NS}}}path")
-        land.set("data-land", "1")
-        land.set("d", _square_perimeter_path(map_size))
-        land.set("fill", land_fill)
-        idx = list(root).index(child)
-        root.remove(child)
-        root.insert(idx, land)
-        break
-    return land_fill
+        if tag == "rect" and child.attrib.get("data-bg") == "1":
+            insert_at = list(root).index(child)
+            root.remove(child)
+            break
+        if tag == "path" and child.attrib.get(marker) == "1":
+            child.set("d", _square_perimeter_path(map_size))
+            child.set("fill", fill)
+            return fill
+
+    path = ET.Element(f"{{{_NS}}}path")
+    path.set(marker, "1")
+    path.set("d", _square_perimeter_path(map_size))
+    path.set("fill", fill)
+    root.insert(insert_at, path)
+    return fill
+
+
+def _promote_bg_rect_to_land_path(root: ET.Element, map_size: float) -> str:
+    """Insert densified land silhouette path; return land fill color.
+
+    Uses ``data-land-fill`` when present (stripe projection). Falls back to
+    legacy data-bg rect fill / style background.
+    """
+    land_fill = svg_land_fill_color(root)
+    for child in list(root):
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "rect" and child.attrib.get("data-bg") == "1":
+            if not root.attrib.get("data-land-fill"):
+                land_fill = child.attrib.get("fill") or land_fill
+            break
+    return _insert_square_fill_path(root, map_size, land_fill, marker="data-land")
 
 
 def _ensure_stripe_base_and_land(
@@ -625,14 +693,18 @@ def warp_svg_barrel(
     r_scale = 2.0 / min(width, height)
     coeffs = parse_barrel_args(barrel_args)
 
-    # Land canvas must warp with features (JPG BarrelInverse warps every pixel).
-    _promote_bg_rect_to_land_path(root, map_size)
+    # Warp the preview canvas (base fill) with features — same as JPG BarrelInverse
+    # warping every pixel. Land silhouette color stays on data-land-fill for stripes.
+    canvas_fill = svg_background_color(root)
+    _insert_square_fill_path(root, map_size, canvas_fill, marker="data-land")
 
     def mapper(x: float, y: float) -> tuple[float, float] | None:
         return barrel_inverse_point(x, y, cx=cx, cy=cy, r_scale=r_scale, coeffs=coeffs)
 
     step = max(2.0, map_size / 200.0)
     _walk_and_transform(root, mapper, densify_step=step)
+    # Keep root background = base fill for viewers that honor SVG style.
+    set_svg_background(root, canvas_fill)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tree.write(dest, encoding="utf-8", xml_declaration=True)
     return dest

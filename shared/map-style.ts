@@ -1,11 +1,29 @@
-export type MapLayerKey = "water" | "streets" | "streetNames" | "buildings" | "landForest";
+export type MapLayerKey =
+  | "water"
+  | "streets"
+  | "streetNames"
+  | "buildings"
+  | "landForest"
+  | "snow"
+  | "sand"
+  | "rock"
+  | "wetland"
+  | "rail";
 
 export interface MapLayerSettings {
   enabled: boolean;
   color: string;
 }
 
-export type MapLayerStyle = Record<MapLayerKey, MapLayerSettings>;
+/**
+ * Per-layer visibility + color.
+ * - `baseFill` (Empty fill): empty stripe / projection space
+ * - `landFill` (Base land fill): terrestrial shore / land mass color
+ */
+export type MapLayerStyle = {
+  baseFill: MapLayerKey;
+  landFill: MapLayerKey;
+} & Record<MapLayerKey, MapLayerSettings>;
 
 export type MapLayerGroupId = "land" | "water" | "transport" | "settlement" | "labels";
 
@@ -24,29 +42,39 @@ export const OSM_ZOOM = {
   labelsWaterMin: 9,
   labelsWaterwayMin: 10,
   labelsParkMin: 11,
-  labelsStreetsMin: 13,
+  labelsStreetsMin: 12,
 } as const;
 
 export const MAP_LAYER_KEYS: MapLayerKey[] = [
   "landForest",
+  "snow",
+  "sand",
+  "rock",
+  "wetland",
   "water",
   "streets",
+  "rail",
   "buildings",
   "streetNames",
 ];
 
 export const MAP_LAYER_LABELS: Record<MapLayerKey, string> = {
   landForest: "Land / forest",
+  snow: "Snow / ice",
+  sand: "Sand",
+  rock: "Rock",
+  wetland: "Wetland",
   water: "Water",
   streets: "Streets",
+  rail: "Rail",
   buildings: "Buildings",
   streetNames: "Labels",
 };
 
 export const MAP_LAYER_GROUPS: MapLayerGroup[] = [
-  { id: "land", label: "Land", keys: ["landForest"] },
+  { id: "land", label: "Land", keys: ["landForest", "snow", "sand", "rock", "wetland"] },
   { id: "water", label: "Water", keys: ["water"] },
-  { id: "transport", label: "Streets", keys: ["streets"] },
+  { id: "transport", label: "Transport", keys: ["streets", "rail"] },
   { id: "settlement", label: "Buildings", keys: ["buildings"] },
   { id: "labels", label: "Labels", keys: ["streetNames"] },
 ];
@@ -74,6 +102,17 @@ export interface OsmStyleLayerDef {
 
 const LABEL_TEXT_FIELD = ["coalesce", ["get", "name"], ["get", "name:latin"], ["get", "name_en"], ""];
 
+const RAIL_SUBCLASSES = [
+  "rail",
+  "narrow_gauge",
+  "preserved",
+  "funicular",
+  "subway",
+  "light_rail",
+  "monorail",
+  "tram",
+] as const;
+
 const STREET_FILTER: unknown = [
   "all",
   ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -83,6 +122,17 @@ const STREET_FILTER: unknown = [
     ["path", "pedestrian", "rail", "transit", "aerialway", "ferry"],
     false,
     true,
+  ],
+  ["!", ["in", ["get", "subclass"], ["literal", [...RAIL_SUBCLASSES]]]],
+];
+
+const RAIL_FILTER: unknown = [
+  "all",
+  ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+  [
+    "any",
+    ["in", ["get", "class"], ["literal", ["rail", "transit"]]],
+    ["in", ["get", "subclass"], ["literal", [...RAIL_SUBCLASSES]]],
   ],
 ];
 
@@ -115,29 +165,49 @@ function labelStyle(
   };
 }
 
-/**
- * For landForest / water, `enabled` means “this color is the base fill”
- * (map background + empty stripe space), not visibility — both are always drawn.
- * Exactly one should be enabled; default is land.
- */
-export const DEFAULT_MAP_LAYERS: MapLayerStyle = {
+/** Empty fill (stripe / projection empty space). */
+export const DEFAULT_BASE_FILL: MapLayerKey = "landForest";
+/** Base land fill (shore / terrestrial mass). */
+export const DEFAULT_LAND_FILL: MapLayerKey = "landForest";
+
+/** Default toggles/colors (without fill selects — see createDefaultMapLayers). */
+export const DEFAULT_MAP_LAYER_SETTINGS: Record<MapLayerKey, MapLayerSettings> = {
   landForest: { enabled: true, color: "#e8eddb" },
-  water: { enabled: false, color: "#9ebfff" },
+  snow: { enabled: true, color: "#f0f4f8" },
+  sand: { enabled: true, color: "#e6d5a8" },
+  rock: { enabled: true, color: "#c2bdb6" },
+  wetland: { enabled: true, color: "#a8c4b0" },
+  water: { enabled: true, color: "#9ebfff" },
   streets: { enabled: true, color: "#ffffff" },
+  rail: { enabled: true, color: "#6a6a6a" },
   buildings: { enabled: true, color: "#d9d5d0" },
   streetNames: { enabled: true, color: "#555555" },
 };
 
-export type BaseFillLayer = "landForest" | "water";
+/** @deprecated Prefer DEFAULT_MAP_LAYER_SETTINGS + createDefaultMapLayers(). */
+export const DEFAULT_MAP_LAYERS: MapLayerStyle = {
+  baseFill: DEFAULT_BASE_FILL,
+  landFill: DEFAULT_LAND_FILL,
+  ...Object.fromEntries(
+    MAP_LAYER_KEYS.map((key) => [key, { ...DEFAULT_MAP_LAYER_SETTINGS[key] }]),
+  ),
+} as MapLayerStyle;
 
-export function isBaseFillLayer(key: MapLayerKey): key is BaseFillLayer {
-  return key === "landForest" || key === "water";
+/** @deprecated Empty/land fill are any MapLayerKey via style.baseFill / style.landFill. */
+export type BaseFillLayer = MapLayerKey;
+
+export function isMapLayerKey(value: unknown): value is MapLayerKey {
+  return typeof value === "string" && (MAP_LAYER_KEYS as string[]).includes(value);
 }
 
-/** Which of land/water fills empty space (stripes, map background). Defaults to land. */
-export function getBaseFillLayer(layers: MapLayerStyle): BaseFillLayer {
-  if (layers.water.enabled && !layers.landForest.enabled) return "water";
-  return "landForest";
+/** @deprecated All layers can supply fill colors; kept for call-site compatibility. */
+export function isBaseFillLayer(key: MapLayerKey): boolean {
+  return isMapLayerKey(key);
+}
+
+/** Which layer color fills empty stripe / projection space (Empty fill). */
+export function getBaseFillLayer(layers: MapLayerStyle): MapLayerKey {
+  return isMapLayerKey(layers.baseFill) ? layers.baseFill : DEFAULT_BASE_FILL;
 }
 
 export function getBaseFillColor(layers: MapLayerStyle): string {
@@ -145,24 +215,72 @@ export function getBaseFillColor(layers: MapLayerStyle): string {
   return layers[base].color;
 }
 
-/** Select land or water as the base fill (mutually exclusive). */
-export function withBaseFillLayer(layers: MapLayerStyle, base: BaseFillLayer): MapLayerStyle {
-  return {
-    ...layers,
-    landForest: { ...layers.landForest, enabled: base === "landForest" },
-    water: { ...layers.water, enabled: base === "water" },
-  };
+/** Which layer color paints shore / terrestrial land (Base land fill). */
+export function getLandFillLayer(layers: MapLayerStyle): MapLayerKey {
+  return isMapLayerKey(layers.landFill) ? layers.landFill : DEFAULT_LAND_FILL;
 }
 
-/** Normalize so exactly one of land/water is the base fill (prefer land if ambiguous). */
+export function getLandFillColor(layers: MapLayerStyle): string {
+  return layers[getLandFillLayer(layers)].color;
+}
+
+/**
+ * Map / SVG land canvas: Base land fill while land is on (continents / shore).
+ * When land is off, Empty fill (or white if empty fill is still land).
+ *
+ * Oceans: water layer ON → water.color; water OFF → Empty fill color painted
+ * on water geometry (so seas become empty-fill, not hidden). Empty fill on
+ * stripes is unchanged (processor `baseFill`).
+ */
+export function getMapCanvasColor(layers: MapLayerStyle): string {
+  if (layers.landForest.enabled) {
+    return getLandFillColor(layers);
+  }
+  if (getBaseFillLayer(layers) === "landForest") {
+    return "#ffffff";
+  }
+  return getBaseFillColor(layers);
+}
+
+/** @deprecated Use getMapCanvasColor — same land/empty wiring for the map preview. */
+export function getMapPreviewBackgroundColor(layers: MapLayerStyle): string {
+  return getMapCanvasColor(layers);
+}
+
+/** Fill/line color for water geometry: water.color, or Empty fill when water is off. */
+export function getWaterPaintColor(layers: MapLayerStyle): string {
+  if (layers.water.enabled) return layers.water.color;
+  return getBaseFillColor(layers);
+}
+
+/** Set the empty-fill source layer (does not change visibility toggles). */
+export function withBaseFillLayer(layers: MapLayerStyle, base: MapLayerKey): MapLayerStyle {
+  const key = isMapLayerKey(base) ? base : DEFAULT_BASE_FILL;
+  return { ...layers, baseFill: key };
+}
+
+/** Set the base land-fill source layer (does not change visibility toggles). */
+export function withLandFillLayer(layers: MapLayerStyle, land: MapLayerKey): MapLayerStyle {
+  const key = isMapLayerKey(land) ? land : DEFAULT_LAND_FILL;
+  return { ...layers, landFill: key };
+}
+
+/** Ensure `baseFill` and `landFill` are valid layer keys. */
 export function ensureBaseFill(layers: MapLayerStyle): MapLayerStyle {
-  return withBaseFillLayer(layers, getBaseFillLayer(layers));
+  let next = layers;
+  if (!isMapLayerKey(next.baseFill)) next = { ...next, baseFill: DEFAULT_BASE_FILL };
+  if (!isMapLayerKey(next.landFill)) next = { ...next, landFill: DEFAULT_LAND_FILL };
+  return next;
 }
 
 export function createDefaultMapLayers(): MapLayerStyle {
-  return Object.fromEntries(
-    MAP_LAYER_KEYS.map((key) => [key, { ...DEFAULT_MAP_LAYERS[key] }]),
-  ) as MapLayerStyle;
+  return {
+    baseFill: DEFAULT_BASE_FILL,
+    landFill: DEFAULT_LAND_FILL,
+    ...Object.fromEntries(
+      MAP_LAYER_KEYS.map((key) => [key, { ...DEFAULT_MAP_LAYER_SETTINGS[key] }]),
+    ),
+  } as MapLayerStyle;
 }
 
 const VECTOR_SOURCE = "openmaptiles";
@@ -203,6 +321,22 @@ function normalizeMapLayers(input?: Partial<MapLayerStyle>): MapLayerStyle {
   const layers = createDefaultMapLayers();
   if (!input) return layers;
 
+  if (isMapLayerKey(input.baseFill)) {
+    layers.baseFill = input.baseFill;
+  } else if (
+    // Legacy XOR: water checkbox alone meant water empty fill (both layers drawn).
+    input.water?.enabled === true &&
+    input.landForest?.enabled === false
+  ) {
+    layers.baseFill = "water";
+    layers.landForest = { ...layers.landForest, enabled: true };
+    layers.water = { ...layers.water, enabled: true };
+  }
+
+  if (isMapLayerKey(input.landFill)) {
+    layers.landFill = input.landFill;
+  }
+
   for (const key of MAP_LAYER_KEYS) {
     const value = input[key];
     if (!value) continue;
@@ -211,6 +345,17 @@ function normalizeMapLayers(input?: Partial<MapLayerStyle>): MapLayerStyle {
       color: value.color ?? layers[key].color,
     };
   }
+
+  // Re-apply legacy water-as-empty visibility after the per-key merge.
+  if (
+    !isMapLayerKey(input.baseFill) &&
+    input.water?.enabled === true &&
+    input.landForest?.enabled === false
+  ) {
+    layers.landForest = { ...layers.landForest, enabled: true };
+    layers.water = { ...layers.water, enabled: true };
+  }
+
   return ensureBaseFill(layers);
 }
 
@@ -222,9 +367,7 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     type: "background",
     style: ({ layers }) => ({
       paint: {
-        // Map land is always the terrestrial background; base-fill choice only
-        // affects empty stripe space (see buildRenderPalette.background).
-        "background-color": layers.landForest.color,
+        "background-color": getMapPreviewBackgroundColor(layers),
       },
     }),
   },
@@ -249,8 +392,61 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     filter: ["in", ["get", "class"], ["literal", ["grass", "meadow", "scrub"]]],
     style: ({ layers }) => ({
       paint: {
-        "fill-color": layers.landForest.color,
+        // Shore / open land uses Base land fill (not the forest layer color).
+        "fill-color": getLandFillColor(layers),
         "fill-opacity": 0.75,
+      },
+    }),
+  },
+  {
+    id: "landcover-snow",
+    group: "snow",
+    sourceLayer: "landcover",
+    type: "fill",
+    filter: ["==", ["get", "class"], "ice"],
+    style: ({ layers }) => ({
+      paint: {
+        "fill-color": layers.snow.color,
+        "fill-opacity": 0.95,
+      },
+    }),
+  },
+  {
+    id: "landcover-sand",
+    group: "sand",
+    sourceLayer: "landcover",
+    type: "fill",
+    filter: ["==", ["get", "class"], "sand"],
+    style: ({ layers }) => ({
+      paint: {
+        "fill-color": layers.sand.color,
+        "fill-opacity": 0.9,
+      },
+    }),
+  },
+  {
+    id: "landcover-rock",
+    group: "rock",
+    sourceLayer: "landcover",
+    type: "fill",
+    filter: ["==", ["get", "class"], "rock"],
+    style: ({ layers }) => ({
+      paint: {
+        "fill-color": layers.rock.color,
+        "fill-opacity": 0.9,
+      },
+    }),
+  },
+  {
+    id: "landcover-wetland",
+    group: "wetland",
+    sourceLayer: "landcover",
+    type: "fill",
+    filter: ["==", ["get", "class"], "wetland"],
+    style: ({ layers }) => ({
+      paint: {
+        "fill-color": layers.wetland.color,
+        "fill-opacity": 0.85,
       },
     }),
   },
@@ -272,7 +468,8 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     sourceLayer: "water",
     type: "fill",
     style: ({ layers }) => ({
-      paint: { "fill-color": layers.water.color },
+      // Always drawn: water.color when on, Empty fill when off (seas → empty color).
+      paint: { "fill-color": getWaterPaintColor(layers) },
     }),
   },
   {
@@ -282,7 +479,7 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     type: "line",
     style: ({ layers }) => ({
       paint: {
-        "line-color": layers.water.color,
+        "line-color": getWaterPaintColor(layers),
         "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.5, 16, 3],
       },
     }),
@@ -297,7 +494,7 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": darken(layers.streets.color, 0.2),
-        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 1, 16, 8],
+        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.6, 16, 3.5],
       },
     }),
   },
@@ -311,7 +508,21 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": layers.streets.color,
-        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.5, 16, 6],
+        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.35, 16, 2.5],
+      },
+    }),
+  },
+  {
+    id: "rail",
+    group: "rail",
+    sourceLayer: "transportation",
+    type: "line",
+    filter: RAIL_FILTER,
+    style: ({ layers }) => ({
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": layers.rail.color,
+        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.3, 16, 1.5],
       },
     }),
   },
@@ -421,7 +632,7 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
   },
   {
     id: "labels-water",
-    group: "streetNames",
+    group: "water",
     sourceLayer: "water_name",
     type: "symbol",
     minzoom: OSM_ZOOM.labelsWaterMin,
@@ -433,7 +644,7 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
   },
   {
     id: "labels-waterway",
-    group: "streetNames",
+    group: "water",
     sourceLayer: "waterway",
     type: "symbol",
     minzoom: OSM_ZOOM.labelsWaterwayMin,
@@ -469,13 +680,12 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
 
 export function layerZoomHint(key: MapLayerKey): string | null {
   switch (key) {
-    case "landForest":
-    case "water":
-      return "Always drawn. Check to use this color as the base fill for empty stripe space.";
     case "buildings":
       return `Built-up areas from z${OSM_ZOOM.builtUpMin}; building footprints from z${OSM_ZOOM.buildingsMin}`;
     case "streetNames":
-      return `Places from z${OSM_ZOOM.labelsPlacesMin}; water z${OSM_ZOOM.labelsWaterMin}; parks z${OSM_ZOOM.labelsParkMin}; streets from z${OSM_ZOOM.labelsStreetsMin}`;
+      return `Places from z${OSM_ZOOM.labelsPlacesMin}; parks z${OSM_ZOOM.labelsParkMin}; streets from z${OSM_ZOOM.labelsStreetsMin}`;
+    case "water":
+      return `Bodies/labels from z${OSM_ZOOM.labelsWaterMin}; off → seas use Empty fill color`;
     default:
       return null;
   }
@@ -495,7 +705,21 @@ function emitStyleLayer(def: OsmStyleLayerDef, ctx: StyleBuildContext): Record<s
   if (def.minzoom != null) layer.minzoom = def.minzoom;
   if (def.maxzoom != null) layer.maxzoom = def.maxzoom;
   if (def.filter != null) layer.filter = def.filter;
-  if (layout) layer.layout = layout;
+
+  // Water fill/line stay visible when "off" (recolored to Empty fill in style()).
+  // Water labels and all other groups toggle visibility normally.
+  const isWaterGeom =
+    def.group === "water" && (def.type === "fill" || def.type === "line");
+  const visible =
+    def.group == null || isWaterGeom || ctx.layers[def.group].enabled;
+
+  // Always set visibility explicitly — MapLibre setStyle({diff:true}) does not
+  // clear a previous visibility:none when the property is omitted.
+  const nextLayout: Record<string, unknown> = {
+    ...(layout ?? {}),
+    visibility: visible ? "visible" : "none",
+  };
+  layer.layout = nextLayout;
   if (paint) layer.paint = paint;
 
   return layer;
@@ -504,22 +728,30 @@ function emitStyleLayer(def: OsmStyleLayerDef, ctx: StyleBuildContext): Record<s
 export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalette {
   const layers = normalizeMapLayers(input);
   const baseFill = getBaseFillColor(layers);
-  const landColor = layers.landForest.color;
+  const landColor = getLandFillColor(layers);
+  const forestColor = layers.landForest.color;
 
   return {
     /** @deprecated Prefer baseFill — kept as alias for stripe empty-space color. */
     background: baseFill,
-    /** Empty stripe / projection fill from the land/water base-fill checkbox. */
+    /** Empty stripe / projection fill (Empty fill select). */
     baseFill,
-    /** Which layer color is used for baseFill. */
+    /** Which layer color is used for empty fill. */
     baseFillLayer: getBaseFillLayer(layers),
-    /** Map canvas / land features — always the land color, never toggled off. */
+    /** Shore / terrestrial land mass (Base land fill select). */
     land: landColor,
-    landForest: darken(landColor, 0.12),
-    landPark: darken(landColor, 0.08),
+    /** Which layer color is used for land fill. */
+    landFillLayer: getLandFillLayer(layers),
+    landForest: darken(forestColor, 0.12),
+    landPark: darken(forestColor, 0.08),
+    snow: layers.snow.color,
+    sand: layers.sand.color,
+    rock: layers.rock.color,
+    wetland: layers.wetland.color,
     water: layers.water.color,
     streets: layers.streets.color,
     streetCasing: darken(layers.streets.color, 0.2),
+    rail: layers.rail.color,
     buildings: layers.buildings.color,
     buildingOutline: darken(layers.buildings.color, 0.25),
     builtUp: lighten(layers.buildings.color, 0.15),
@@ -528,13 +760,21 @@ export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalett
       landGrass: 0.75,
       landForest: 0.85,
       landPark: 0.8,
+      snow: 0.95,
+      sand: 0.9,
+      rock: 0.9,
+      wetland: 0.85,
       builtUp: 0.55,
     },
     enabled: {
-      // Land + water features are always painted; base fill is `baseFill`.
-      landForest: true,
-      water: true,
+      landForest: layers.landForest.enabled,
+      water: layers.water.enabled,
+      snow: layers.snow.enabled,
+      sand: layers.sand.enabled,
+      rock: layers.rock.enabled,
+      wetland: layers.wetland.enabled,
       streets: layers.streets.enabled,
+      rail: layers.rail.enabled,
       buildings: layers.buildings.enabled,
       labels: layers.streetNames.enabled,
     },
@@ -544,13 +784,19 @@ export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalett
 export interface RenderPalette {
   background: string;
   baseFill: string;
-  baseFillLayer: BaseFillLayer;
+  baseFillLayer: MapLayerKey;
   land: string;
+  landFillLayer: MapLayerKey;
   landForest: string;
   landPark: string;
+  snow: string;
+  sand: string;
+  rock: string;
+  wetland: string;
   water: string;
   streets: string;
   streetCasing: string;
+  rail: string;
   buildings: string;
   buildingOutline: string;
   builtUp: string;
@@ -559,12 +805,21 @@ export interface RenderPalette {
     landGrass: number;
     landForest: number;
     landPark: number;
+    snow: number;
+    sand: number;
+    rock: number;
+    wetland: number;
     builtUp: number;
   };
   enabled: {
     landForest: boolean;
     water: boolean;
+    snow: boolean;
+    sand: boolean;
+    rock: boolean;
+    wetland: boolean;
     streets: boolean;
+    rail: boolean;
     buildings: boolean;
     labels: boolean;
   };
@@ -574,12 +829,7 @@ export function buildMapStyle(input?: Partial<MapLayerStyle>): Record<string, un
   const layers = normalizeMapLayers(input);
   const ctx: StyleBuildContext = { layers };
 
-  const styleLayers = OSM_STYLE_LAYERS.filter((def) => {
-    if (def.group == null) return true;
-    // Land/water are always visible; their `enabled` flag only picks the base fill.
-    if (isBaseFillLayer(def.group)) return true;
-    return layers[def.group].enabled;
-  }).map((def) => emitStyleLayer(def, ctx));
+  const styleLayers = OSM_STYLE_LAYERS.map((def) => emitStyleLayer(def, ctx));
 
   return {
     version: 8,
@@ -599,8 +849,25 @@ export function validateMapLayers(input: unknown): MapLayerStyle {
     return createDefaultMapLayers();
   }
 
-  const record = input as Partial<Record<MapLayerKey, Partial<MapLayerSettings>>>;
+  const record = input as Partial<MapLayerStyle> &
+    Partial<Record<MapLayerKey, Partial<MapLayerSettings>>>;
   const result = createDefaultMapLayers();
+
+  const legacyWaterBase =
+    !isMapLayerKey(record.baseFill) &&
+    record.water?.enabled === true &&
+    record.landForest?.enabled === false;
+
+  if (isMapLayerKey(record.baseFill)) {
+    result.baseFill = record.baseFill;
+  } else if (legacyWaterBase) {
+    // Legacy XOR: water checkbox meant water empty fill (both layers drawn).
+    result.baseFill = "water";
+  }
+
+  if (isMapLayerKey(record.landFill)) {
+    result.landFill = record.landFill;
+  }
 
   for (const key of MAP_LAYER_KEYS) {
     const value = record[key];
@@ -611,6 +878,11 @@ export function validateMapLayers(input: unknown): MapLayerStyle {
     if (typeof value.color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(value.color)) {
       result[key].color = value.color;
     }
+  }
+
+  if (legacyWaterBase) {
+    result.landForest = { ...result.landForest, enabled: true };
+    result.water = { ...result.water, enabled: true };
   }
 
   return ensureBaseFill(result);

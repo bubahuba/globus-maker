@@ -40,8 +40,8 @@ Set `API_CALLBACK_ORIGIN` so Docker processor can PATCH progress (default `http:
 ## Job modes
 
 - `mode: "map" | "globe"` (default/legacy: globe)
-- Map: `squareSidePx` + `outputFormat` jpg|svg; no stripes/diameter required
-- Globe: `stripes` + `diameterCm`; `outputFormat` forced to jpg
+- Map: `squareSidePx` + `outputFormat` jpg|svg; square export only (no prewarp)
+- Globe: `stripes` + `diameterCm`; `outputFormat` forced to jpg; sphere from `input.svg`, then prewarp + JPEG stripes
 - Download names: globe `{place}-{cm}cm.zip`, map `{place}-{px}px.zip`
 
 ## Adding API fields

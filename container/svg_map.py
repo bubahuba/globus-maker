@@ -16,10 +16,13 @@ from tile_render import (
     BUILT_UP_CLASSES,
     EXTENT,
     LAND_FOREST_CLASSES,
+    LAND_ROCK_CLASSES,
+    LAND_SAND_CLASSES,
+    LAND_SNOW_CLASSES,
+    LAND_WETLAND_CLASSES,
     MAX_CONCURRENT,
     PLACE_LABEL_PRIORITY,
     PRINT_PLACE_CLASSES,
-    STREET_EXCLUDE,
     STREET_LABEL_PRIORITY,
     STREET_NAME_CLASSES,
     USER_AGENT,
@@ -37,6 +40,8 @@ from tile_render import (
     _feature_name,
     _geometry_lines,
     _geometry_polygons,
+    _is_rail_feature,
+    _is_street_feature,
     _label_anchor,
     _layer_features,
     _line_midpoint_and_angle,
@@ -45,6 +50,9 @@ from tile_render import (
     _street_line_width,
     _waterway_line_width,
     fetch_manifest,
+    map_canvas_color,
+    map_land_fill_color,
+    water_paint_color,
 )
 import tile_render as _tile_render
 
@@ -81,12 +89,14 @@ class _SvgBuilder:
     def __init__(
         self,
         size: float,
-        land_color: str,
+        canvas_color: str,
         *,
+        land_fill: str | None = None,
         min_gap: float = 6.0,
     ) -> None:
         self.size = size
-        self.land_color = land_color
+        self.canvas_color = canvas_color
+        self.land_fill = land_fill
         self.layers: dict[str, list[str]] = {
             "landcover": [],
             "park": [],
@@ -96,6 +106,7 @@ class _SvgBuilder:
             "buildings": [],
             "street_casing": [],
             "streets": [],
+            "rail": [],
             "boundaries": [],
             "labels": [],
         }
@@ -191,11 +202,11 @@ class _SvgBuilder:
 
     def to_svg(self) -> str:
         s = self.size
+        land_attr = f' data-land-fill="{self.land_fill}"' if self.land_fill else ""
         parts = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {_fmt(s)} {_fmt(s)}" '
-            f'width="{_fmt(s)}" height="{_fmt(s)}">',
-            f'<rect data-bg="1" x="0" y="0" width="{_fmt(s)}" height="{_fmt(s)}" fill="{self.land_color}"/>',
+            f'style="background:{self.canvas_color}"{land_attr}>',
         ]
         order = [
             "landcover",
@@ -206,6 +217,7 @@ class _SvgBuilder:
             "buildings",
             "street_casing",
             "streets",
+            "rail",
             "boundaries",
             "labels",
         ]
@@ -294,31 +306,64 @@ def _append_tile_geometry(
 
     for feature in _layer_features(decoded, "landcover"):
         props = feature.get("properties", {})
-        if props.get("class") not in LAND_FOREST_CLASSES:
-            continue
+        cls = props.get("class")
         geometry = _decode_feature_geometry(feature)
         if not geometry:
             continue
         for poly in _geometry_polygons(geometry):
             rings = [map_ring(ring) for ring in poly]
-            if props.get("class") in {"wood", "forest"}:
-                svg.add_polygon("landcover", rings, forest_color, opacity.get("landForest", 0.85))
-            else:
-                svg.add_polygon("landcover", rings, land_color, opacity.get("landGrass", 0.75))
+            if cls in LAND_FOREST_CLASSES:
+                if not enabled.get("landForest", True):
+                    continue
+                if cls in {"wood", "forest"}:
+                    svg.add_polygon("landcover", rings, forest_color, opacity.get("landForest", 0.85))
+                else:
+                    svg.add_polygon("landcover", rings, land_color, opacity.get("landGrass", 0.75))
+            elif cls in LAND_SNOW_CLASSES and enabled.get("snow", True):
+                svg.add_polygon(
+                    "landcover",
+                    rings,
+                    palette.get("snow", "#f0f4f8"),
+                    opacity.get("snow", 0.95),
+                )
+            elif cls in LAND_SAND_CLASSES and enabled.get("sand", True):
+                svg.add_polygon(
+                    "landcover",
+                    rings,
+                    palette.get("sand", "#e6d5a8"),
+                    opacity.get("sand", 0.9),
+                )
+            elif cls in LAND_ROCK_CLASSES and enabled.get("rock", True):
+                svg.add_polygon(
+                    "landcover",
+                    rings,
+                    palette.get("rock", "#c2bdb6"),
+                    opacity.get("rock", 0.9),
+                )
+            elif cls in LAND_WETLAND_CLASSES and enabled.get("wetland", True):
+                svg.add_polygon(
+                    "landcover",
+                    rings,
+                    palette.get("wetland", "#a8c4b0"),
+                    opacity.get("wetland", 0.85),
+                )
 
-    for feature in _layer_features(decoded, "park"):
-        geometry = _decode_feature_geometry(feature)
-        if not geometry:
-            continue
-        for poly in _geometry_polygons(geometry):
-            svg.add_polygon(
-                "park",
-                [map_ring(ring) for ring in poly],
-                park_color,
-                opacity.get("landPark", 0.8),
-            )
+    if enabled.get("landForest", True):
+        for feature in _layer_features(decoded, "park"):
+            geometry = _decode_feature_geometry(feature)
+            if not geometry:
+                continue
+            for poly in _geometry_polygons(geometry):
+                svg.add_polygon(
+                    "park",
+                    [map_ring(ring) for ring in poly],
+                    park_color,
+                    opacity.get("landPark", 0.8),
+                )
 
-    water_color = palette.get("water", "#9ebfff")
+    # Always paint water geometry: water.color when on, Empty fill when off
+    # (seas become empty-fill color so continents sit on empty-fill oceans).
+    water_color = water_paint_color(palette)
     for feature in _layer_features(decoded, "water"):
         geometry = _decode_feature_geometry(feature)
         if not geometry:
@@ -341,7 +386,7 @@ def _append_tile_geometry(
         casing_width = _street_casing_width(zoom, render_scale) * scale
         for feature in _layer_features(decoded, "transportation"):
             props = feature.get("properties", {})
-            if props.get("class") in STREET_EXCLUDE:
+            if not _is_street_feature(props):
                 continue
             geometry = _decode_feature_geometry(feature)
             if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
@@ -350,6 +395,19 @@ def _append_tile_geometry(
                 pts = map_ring(line)
                 svg.add_line("street_casing", pts, street_casing, casing_width)
                 svg.add_line("streets", pts, street_color, street_width)
+
+    if enabled.get("rail", True):
+        rail_color = palette.get("rail", "#6a6a6a")
+        rail_width = max(0.25, _street_line_width(zoom, render_scale) * 0.45 * scale)
+        for feature in _layer_features(decoded, "transportation"):
+            props = feature.get("properties", {})
+            if not _is_rail_feature(props):
+                continue
+            geometry = _decode_feature_geometry(feature)
+            if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
+                continue
+            for line in _geometry_lines(geometry):
+                svg.add_line("rail", map_ring(line), rail_color, rail_width)
 
     if enabled.get("buildings", True) and zoom >= ZOOM_BUILT_UP_MIN:
         built_up_color = palette.get("builtUp", palette.get("buildings", "#d9d5d0"))
@@ -452,7 +510,7 @@ def _append_labels(
         if len(svg._boxes) > before:
             placed.add(name)
 
-    if label_zoom >= ZOOM_LABELS_WATER_MIN:
+    if enabled.get("water", True) and label_zoom >= ZOOM_LABELS_WATER_MIN:
         for tile_x, tile_y, decoded in decoded_tiles:
             for feature in _layer_features(decoded, "water_name"):
                 props = feature.get("properties", {})
@@ -527,10 +585,13 @@ def build_svg_from_payloads(
     zoom = int(work_manifest["zoom"])
     scale, ox, oy, out_size, _ = _crop_transform(work_manifest)
 
-    # Canvas fill is always land — never baseFill/background (water-as-base only
-    # fills empty stripe space after projection).
-    land_color = render_palette.get("land") or "#e8eddb"
-    svg = _SvgBuilder(out_size, land_color, min_gap=4.0 * render_scale * scale)
+    # Root background = land canvas (or empty when land off). data-land-fill = warp silhouette.
+    svg = _SvgBuilder(
+        out_size,
+        map_canvas_color(render_palette),
+        land_fill=map_land_fill_color(render_palette),
+        min_gap=4.0 * render_scale * scale,
+    )
 
     decoded_tiles: list[tuple[int, int, dict[str, Any]]] = []
     total = len(tile_payloads)

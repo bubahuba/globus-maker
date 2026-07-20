@@ -56,7 +56,8 @@ if [[ "$SKIP_PROCESSOR" == false ]]; then
 fi
 
 echo "==> Starting API on http://localhost:8787"
-npx tsx "$ROOT/BE/src/dev-server.ts" &
+# Watch mode reloads when BE/shared imports change (plain tsx keeps a stale module graph).
+npx tsx watch --clear-screen=false "$ROOT/BE/src/dev-server.ts" &
 
 echo "==> Starting frontend on http://localhost:5173"
 npm run dev --prefix "$ROOT/FE" &

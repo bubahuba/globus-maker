@@ -7,8 +7,8 @@ description: Understand and modify the Globus Maker job pipeline from map select
 
 ## Modes
 
-- **map** — square map only (`input.svg` or rasterized `input.jpg`); no prewarp/stripes
-- **globe** — SVG stitch + prewarp, then JPEG stripes via `slize.pl` (no SVG stripe option)
+- **map** — square map (`input.svg` or rasterized `input.jpg`); no prewarp, no stripes
+- **globe** — SVG stitch + DePolar sphere from `input.svg`, then prewarp + JPEG stripes via `slize.pl`
 
 ## User flow
 
@@ -35,10 +35,10 @@ description: Understand and modify the Globus Maker job pipeline from map select
 ## Processor steps
 
 1. **fetching_tiles** — MVT → square `input.svg` (`svg_map.py`)
-2. **stitching** — upload stitched SVG
-3. **Map** — optional SVG→JPEG; **packaging** zip; done (skip projecting)
-4. **Globe prewarp** — BarrelInverse → `input-distorted.svg`; rasterize → `input-distorted.jpg`
-5. **projecting** — `slize.pl` → `out-*.jpg`; DePolar JPEG sphere preview
+2. **Map** — optional SVG→JPEG; **packaging** zip (`input.svg`/`input.jpg`); done
+3. **Globe** — DePolar sphere from `input.svg` → `input-distorted-preview.jpg`
+4. **Globe** — BarrelInverse prewarp → `input-distorted.svg` + raster `input-distorted.jpg`
+5. **projecting** — `slize.pl` → `out-*.jpg`
 6. **packaging** — zip `input.svg` + `input-distorted.svg` + stripe JPGs
 7. API stores zip in R2, marks **complete**
 

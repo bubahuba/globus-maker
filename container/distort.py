@@ -3,7 +3,7 @@
 Primary paths use svg_warp / slize.pl for stripes. This module still provides:
 - ImageMagick BarrelInverse for JPEG prewarp
 - SVG→JPEG rasterization
-- Sphere preview: DePolar unwrap of the prewarped map (equirect for WebGL)
+- Sphere preview: DePolar unwrap of the stitched map (equirect for WebGL)
 """
 
 from __future__ import annotations

@@ -16,6 +16,10 @@
 		mode?: JobMode | null;
 		/** Map-mode format; Globe maps are always SVG. */
 		outputFormat?: OutputFormat | null;
+		/** SVG / map image letterbox (land canvas). */
+		mapCanvasColor?: string | null;
+		/** Empty fill hex for 3D sphere scene background. */
+		emptyFillColor?: string | null;
 		visible: boolean;
 	}
 
@@ -28,13 +32,20 @@
 		artifactsAvailable = true,
 		mode = null,
 		outputFormat = null,
+		mapCanvasColor = null,
+		emptyFillColor = null,
 		visible
 	}: Props = $props();
 
 	const effectiveMode = $derived.by((): JobMode => {
 		if (mode === 'map' || mode === 'globe') return mode;
+		// Prewarped SVG / stripes prove globe; map jobs only ship the square export.
 		const lower = files.map((f) => f.toLowerCase());
-		if (lower.some((f) => /^out-\d+\./.test(f) || f === 'input-distorted.svg' || f === 'input-distorted.jpg')) {
+		if (
+			lower.some((f) => /^out-\d+\.jpe?g$/.test(f)) ||
+			lower.includes('input-distorted.svg') ||
+			lower.includes('input-distorted-preview.jpg')
+		) {
 			return 'globe';
 		}
 		return 'map';
@@ -47,15 +58,17 @@
 				{ filename: 'input-distorted.svg', label: 'Prewarped map' }
 			] as const;
 		}
-		const mapFile = outputFormat === 'svg' ? 'input.svg' : 'input.jpg';
-		// Infer from uploaded files when format unknown.
+		// Prefer whatever the job actually uploaded (globe jobs only have SVG;
+		// map jpg/svg exports differ). Fall back to outputFormat while waiting.
 		const lower = files.map((f) => f.toLowerCase());
-		if (outputFormat == null) {
-			if (lower.includes('input.svg')) {
-				return [{ filename: 'input.svg', label: 'Stitched map' }] as const;
-			}
-			return [{ filename: 'input.jpg', label: 'Stitched map' }] as const;
-		}
+		const jpgName = lower.find((f) => f === 'input.jpg' || f === 'input.jpeg');
+		const mapFile = jpgName
+			? (files.find((f) => f.toLowerCase() === jpgName) ?? jpgName)
+			: lower.includes('input.svg')
+				? 'input.svg'
+				: outputFormat === 'svg'
+					? 'input.svg'
+					: 'input.jpg';
 		return [{ filename: mapFile, label: 'Stitched map' }] as const;
 	});
 
@@ -87,12 +100,8 @@
 			: null
 	);
 
-	const distortedReady = $derived(
-		effectiveMode === 'globe' &&
-			files.some((f) => {
-				const n = f.toLowerCase();
-				return n === 'input-distorted.jpg' || n === 'input-distorted.svg';
-			})
+	const stitchedReady = $derived(
+		effectiveMode === 'globe' && files.some((f) => f.toLowerCase() === 'input.svg')
 	);
 
 	const showPlaceholders = $derived(
@@ -127,7 +136,7 @@
 	const previewHelperText = $derived(
 		effectiveMode === 'map'
 			? 'The square map appears here when stitching finishes.'
-			: 'SVG map previews and JPEG stripes appear here as each file finishes processing.'
+			: 'SVG maps, sphere preview, and JPEG stripes appear here as each file finishes processing.'
 	);
 
 	let sphereRevision = $state<string | null>(null);
@@ -163,14 +172,17 @@
 
 		{#if showPreviews}
 			<div class="grid gap-4 md:grid-cols-2">
-				{#each readyMaps as slot (slot.filename)}
+				{#each readyMaps as slot (`${jobId}-${slot.filename}-${revision ?? ''}`)}
 					<div class="space-y-2">
 						<p class="text-sm font-medium text-stone-700">{slot.label}</p>
 						{#if slot.ready}
 							<img
 								src={jobFileUrl(jobId, slot.filename, revision ?? undefined)}
 								alt={slot.label}
-								class="w-full max-h-[min(70vh,36rem)] rounded-lg bg-stone-50 object-contain ring-1 ring-stone-200"
+								class="w-full max-h-[min(70vh,36rem)] rounded-lg object-contain ring-1 ring-stone-200 {mapCanvasColor
+									? ''
+									: 'bg-stone-50'}"
+								style:background-color={mapCanvasColor ?? undefined}
 							/>
 							<p class="text-xs text-stone-400">{slot.filename}</p>
 						{:else}
@@ -189,49 +201,52 @@
 					<div class="space-y-2">
 						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
 						<p class="text-sm text-stone-500">
-							Globe from an ImageMagick DePolar unwrap of the prewarped map. Map centre is the
+							Globe from an ImageMagick DePolar unwrap of the stitched map. Map centre is the
 							north pole.
 						</p>
 						<DistortedPanoramaViewer
 							src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
+							backgroundColor={emptyFillColor ?? undefined}
 						/>
 					</div>
-				{:else if (distortedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
+				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 					<div class="space-y-2">
 						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
 						<p class="text-sm text-stone-500">Waiting for DePolar texture…</p>
 					</div>
 				{/if}
 
-				<div class="space-y-3">
-					<h3 class="text-base font-medium text-stone-900">Stripes</h3>
-					<div
-						class="grid w-full gap-2"
-						style:grid-template-columns="repeat({stripeColumns}, minmax(0, 1fr))"
-					>
-						{#each stripeSlots as slot (slot.key)}
-							<div class="flex min-w-0 flex-col items-center gap-1.5">
-								{#if slot.filename}
-									<img
-										src={jobFileUrl(jobId, slot.filename, revision ?? undefined)}
-										alt={slot.filename}
-										class="h-auto max-h-[500px] w-full rounded-md bg-stone-50 object-contain ring-1 ring-stone-200"
-									/>
-									<p class="w-full truncate text-center text-xs text-stone-500">
-										{slot.filename}
-									</p>
-								{:else}
-									<div
-										class="flex h-[min(40vw,500px)] w-full animate-pulse items-center justify-center rounded-md bg-stone-100 text-stone-400 ring-1 ring-stone-200"
-									>
-										…
-									</div>
-									<p class="text-xs text-stone-400">Waiting…</p>
-								{/if}
-							</div>
-						{/each}
+				{#if stripeSlots.length > 0}
+					<div class="space-y-3">
+						<h3 class="text-base font-medium text-stone-900">Stripes</h3>
+						<div
+							class="grid w-full gap-2"
+							style:grid-template-columns="repeat({stripeColumns}, minmax(0, 1fr))"
+						>
+							{#each stripeSlots as slot (`${jobId}-${slot.key}-${revision ?? ''}`)}
+								<div class="flex min-w-0 flex-col items-center gap-1.5">
+									{#if slot.filename}
+										<img
+											src={jobFileUrl(jobId, slot.filename, revision ?? undefined)}
+											alt={slot.filename}
+											class="h-auto max-h-[500px] w-full rounded-md bg-stone-50 object-contain ring-1 ring-stone-200"
+										/>
+										<p class="w-full truncate text-center text-xs text-stone-500">
+											{slot.filename}
+										</p>
+									{:else}
+										<div
+											class="flex h-[min(40vw,500px)] w-full animate-pulse items-center justify-center rounded-md bg-stone-100 text-stone-400 ring-1 ring-stone-200"
+										>
+											…
+										</div>
+										<p class="text-xs text-stone-400">Waiting…</p>
+									{/if}
+								</div>
+							{/each}
+						</div>
 					</div>
-				</div>
+				{/if}
 			{/if}
 		{/if}
 	</section>

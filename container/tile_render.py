@@ -26,15 +26,32 @@ EXTENT = 4096
 # MapLibre sizes are tuned for on-screen tiles; scale down for high-res print output.
 LABEL_PRINT_SCALE = 0.25
 LABEL_STROKE_WIDTH = 2
-STREET_PRINT_SCALE = 0.25
-STREET_CASING_PRINT_SCALE = 0.2
+# Street widths are also multiplied by SVG output scale — keep these low so high-res
+# exports don't produce multi-pixel-thick roads (was ~8px at typical map sizes).
+STREET_PRINT_SCALE = 0.1
+STREET_CASING_PRINT_SCALE = 0.08
 BOUNDARY_PRINT_SCALE = 0.6
 STREET_EXCLUDE = {"path", "pedestrian", "rail", "transit", "aerialway", "ferry"}
+RAIL_CLASSES = {"rail", "transit"}
+RAIL_SUBCLASSES = {
+    "rail",
+    "narrow_gauge",
+    "preserved",
+    "funicular",
+    "subway",
+    "light_rail",
+    "monorail",
+    "tram",
+}
 BOUNDARY_ADMIN_LEVELS = {2, 4}
 BOUNDARY_COUNTRY_COLOR = "#555555"
 BOUNDARY_STATE_COLOR = "#888888"
 BOUNDARY_DISPUTED_COLOR = "#b05050"
 LAND_FOREST_CLASSES = {"wood", "forest", "grass", "meadow", "scrub"}
+LAND_SNOW_CLASSES = {"ice"}
+LAND_SAND_CLASSES = {"sand"}
+LAND_ROCK_CLASSES = {"rock"}
+LAND_WETLAND_CLASSES = {"wetland"}
 BUILT_UP_CLASSES = {"residential", "commercial", "industrial", "retail"}
 
 # Keep in sync with shared/map-style.ts OSM_ZOOM
@@ -42,13 +59,19 @@ ZOOM_BUILT_UP_MIN = 10  # built-up landuse from this zoom up (no upper bound)
 ZOOM_BUILDINGS_MIN = 12
 ZOOM_LABELS_PLACES_MIN = 3
 ZOOM_LABELS_WATER_MIN = 9
-ZOOM_LABELS_STREETS_MIN = 13
+ZOOM_LABELS_STREETS_MIN = 12
+
+DEFAULT_BASE_FILL = "landForest"
 
 DEFAULT_MAP_LAYERS: dict[str, dict[str, Any]] = {
-    # landForest/water `enabled` selects base fill (empty stripe space); both are always drawn.
     "landForest": {"enabled": True, "color": "#e8eddb"},
-    "water": {"enabled": False, "color": "#9ebfff"},
+    "snow": {"enabled": True, "color": "#f0f4f8"},
+    "sand": {"enabled": True, "color": "#e6d5a8"},
+    "rock": {"enabled": True, "color": "#c2bdb6"},
+    "wetland": {"enabled": True, "color": "#a8c4b0"},
+    "water": {"enabled": True, "color": "#9ebfff"},
     "streets": {"enabled": True, "color": "#ffffff"},
+    "rail": {"enabled": True, "color": "#6a6a6a"},
     "buildings": {"enabled": True, "color": "#d9d5d0"},
     "streetNames": {"enabled": True, "color": "#555555"},
 }
@@ -91,10 +114,40 @@ def _lighten(color: str, amount: float = 0.2) -> str:
     return f"#{channel(r)}{channel(g)}{channel(b)}"
 
 
-def _normalize_map_layers(input_layers: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+DEFAULT_LAND_FILL = "landForest"
+
+
+def _normalize_map_layers(
+    input_layers: dict[str, Any] | None,
+) -> tuple[dict[str, dict[str, Any]], str, str]:
     layers = {key: dict(value) for key, value in DEFAULT_MAP_LAYERS.items()}
+    base_fill = DEFAULT_BASE_FILL
+    land_fill = DEFAULT_LAND_FILL
     if not input_layers:
-        return _ensure_base_fill(layers)
+        return layers, base_fill, land_fill
+
+    has_base_fill = isinstance(input_layers.get("baseFill"), str) and input_layers[
+        "baseFill"
+    ] in DEFAULT_MAP_LAYERS
+    has_land_fill = isinstance(input_layers.get("landFill"), str) and input_layers[
+        "landFill"
+    ] in DEFAULT_MAP_LAYERS
+    legacy_water_base = (
+        not has_base_fill
+        and isinstance(input_layers.get("water"), dict)
+        and input_layers["water"].get("enabled") is True
+        and isinstance(input_layers.get("landForest"), dict)
+        and input_layers["landForest"].get("enabled") is False
+    )
+
+    if has_base_fill:
+        base_fill = str(input_layers["baseFill"])
+    elif legacy_water_base:
+        # Legacy XOR: water checkbox meant water empty fill (both layers drawn).
+        base_fill = "water"
+
+    if has_land_fill:
+        land_fill = str(input_layers["landFill"])
 
     for key, default in DEFAULT_MAP_LAYERS.items():
         override = input_layers.get(key)
@@ -104,41 +157,52 @@ def _normalize_map_layers(input_layers: dict[str, Any] | None) -> dict[str, dict
             "enabled": override.get("enabled", default["enabled"]),
             "color": override.get("color", default["color"]),
         }
-    return _ensure_base_fill(layers)
+
+    if legacy_water_base:
+        layers["landForest"] = {**layers["landForest"], "enabled": True}
+        layers["water"] = {**layers["water"], "enabled": True}
+
+    return layers, base_fill, land_fill
 
 
-def _base_fill_key(layers: dict[str, dict[str, Any]]) -> str:
-    """Which of land/water fills empty space; default land if ambiguous."""
-    if layers["water"]["enabled"] and not layers["landForest"]["enabled"]:
-        return "water"
-    return "landForest"
+def _is_rail_feature(props: dict[str, Any]) -> bool:
+    if props.get("class") in RAIL_CLASSES:
+        return True
+    return props.get("subclass") in RAIL_SUBCLASSES
 
 
-def _ensure_base_fill(layers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    base = _base_fill_key(layers)
-    layers["landForest"] = {**layers["landForest"], "enabled": base == "landForest"}
-    layers["water"] = {**layers["water"], "enabled": base == "water"}
-    return layers
+def _is_street_feature(props: dict[str, Any]) -> bool:
+    if props.get("class") in STREET_EXCLUDE:
+        return False
+    if _is_rail_feature(props):
+        return False
+    return True
 
 
 def build_render_palette_from_layers(input_layers: dict[str, Any] | None = None) -> dict[str, Any]:
-    layers = _normalize_map_layers(input_layers)
-    base_key = _base_fill_key(layers)
+    layers, base_key, land_key = _normalize_map_layers(input_layers)
     base_fill = layers[base_key]["color"]
-    land_color = layers["landForest"]["color"]
+    land_color = layers[land_key]["color"]
+    forest_color = layers["landForest"]["color"]
 
     return {
-        # Stripe empty-space fill (from land/water base-fill checkbox).
+        # Stripe empty-space fill (Empty fill select / baseFill).
         "background": base_fill,
         "baseFill": base_fill,
         "baseFillLayer": base_key,
-        # Map canvas / land features — always land color.
+        # Shore / terrestrial land mass (Base land fill select).
         "land": land_color,
-        "landForest": _darken(land_color, 0.12),
-        "landPark": _darken(land_color, 0.08),
+        "landFillLayer": land_key,
+        "landForest": _darken(forest_color, 0.12),
+        "landPark": _darken(forest_color, 0.08),
+        "snow": layers["snow"]["color"],
+        "sand": layers["sand"]["color"],
+        "rock": layers["rock"]["color"],
+        "wetland": layers["wetland"]["color"],
         "water": layers["water"]["color"],
         "streets": layers["streets"]["color"],
         "streetCasing": _darken(layers["streets"]["color"], 0.2),
+        "rail": layers["rail"]["color"],
         "buildings": layers["buildings"]["color"],
         "buildingOutline": _darken(layers["buildings"]["color"], 0.25),
         "builtUp": _lighten(layers["buildings"]["color"], 0.15),
@@ -147,13 +211,21 @@ def build_render_palette_from_layers(input_layers: dict[str, Any] | None = None)
             "landGrass": 0.75,
             "landForest": 0.85,
             "landPark": 0.8,
+            "snow": 0.95,
+            "sand": 0.9,
+            "rock": 0.9,
+            "wetland": 0.85,
             "builtUp": 0.55,
         },
         "enabled": {
-            # Land + water features always painted; base fill is `baseFill`.
-            "landForest": True,
-            "water": True,
+            "landForest": layers["landForest"]["enabled"],
+            "water": layers["water"]["enabled"],
+            "snow": layers["snow"]["enabled"],
+            "sand": layers["sand"]["enabled"],
+            "rock": layers["rock"]["enabled"],
+            "wetland": layers["wetland"]["enabled"],
             "streets": layers["streets"]["enabled"],
+            "rail": layers["rail"]["enabled"],
             "buildings": layers["buildings"]["enabled"],
             "labels": layers["streetNames"]["enabled"],
         },
@@ -164,12 +236,40 @@ def default_render_palette() -> dict[str, Any]:
     return build_render_palette_from_layers()
 
 
+def map_canvas_color(render_palette: dict[str, Any]) -> str:
+    """Square map canvas (SVG root ``background`` / raster fill).
+
+    Land on → Base land fill (continents). Land off → Empty fill (or white when
+    empty fill is still land). Oceans use water paint (see ``water_paint_color``).
+    """
+    enabled = render_palette.get("enabled", {})
+    if enabled.get("landForest", True):
+        return render_palette.get("land") or "#e8eddb"
+    base = render_palette.get("baseFill") or render_palette.get("background") or "#ffffff"
+    if render_palette.get("baseFillLayer") == "landForest":
+        return "#ffffff"
+    return base
+
+
+def water_paint_color(render_palette: dict[str, Any]) -> str:
+    """Water geometry color: water.color when on, Empty fill when water is off."""
+    enabled = render_palette.get("enabled", {})
+    if enabled.get("water", True):
+        return render_palette.get("water") or "#9ebfff"
+    return render_palette.get("baseFill") or render_palette.get("background") or "#ffffff"
+
+
+def map_land_fill_color(render_palette: dict[str, Any]) -> str | None:
+    """Shore / land silhouette color (``data-land-fill``); None when land is off."""
+    enabled = render_palette.get("enabled", {})
+    if not enabled.get("landForest", True):
+        return None
+    return render_palette.get("land") or "#e8eddb"
+
+
 def _force_land_water_enabled(palette: dict[str, Any]) -> dict[str, Any]:
-    """Land/water checkboxes select base fill only — never hide those layers."""
-    enabled = dict(palette.get("enabled") or {})
-    enabled["landForest"] = True
-    enabled["water"] = True
-    palette = {**palette, "enabled": enabled}
+    """Normalize baseFill aliases on a client-supplied palette (no forced visibility)."""
+    palette = {**palette}
     base_fill = palette.get("baseFill") or palette.get("background")
     if base_fill:
         palette["baseFill"] = base_fill
@@ -178,7 +278,6 @@ def _force_land_water_enabled(palette: dict[str, Any]) -> dict[str, Any]:
 
 
 def resolve_render_palette(payload: dict[str, Any]) -> dict[str, Any]:
-    # Prefer mapLayers so land/water `enabled` means base-fill, not visibility.
     map_layers = payload.get("mapLayers")
     if isinstance(map_layers, dict) and map_layers:
         return build_render_palette_from_layers(map_layers)
@@ -331,7 +430,7 @@ def _draw_line_layer(
     base: Image.Image,
     geometry: dict[str, Any],
     color: str,
-    width: int,
+    width: float | int,
     opacity: float = 1.0,
     render_size: int = TILE_SIZE,
     to_pixels: Callable[[list[list[float]]], list[tuple[float, float]]] | None = None,
@@ -341,11 +440,12 @@ def _draw_line_layer(
     draw = ImageDraw.Draw(overlay)
     stroke = _hex_to_rgba(color, opacity)
     map_coords = to_pixels or (lambda coords: _to_pixels(coords, render_size))
+    stroke_width = max(1, round(width))
 
     for line in _geometry_lines(geometry):
         points = map_coords(line)
         if len(points) >= 2:
-            draw.line(points, fill=stroke, width=width, joint="curve")
+            draw.line(points, fill=stroke, width=stroke_width, joint="curve")
 
     return Image.alpha_composite(_ensure_rgba(base), overlay)
 
@@ -372,14 +472,14 @@ def _exp_interpolate(zoom: float, z0: float, v0: float, z1: float, v1: float, ba
     return v0 * (1 - t) + v1 * t
 
 
-def _street_line_width(zoom: int, render_scale: int = 1) -> int:
+def _street_line_width(zoom: int, render_scale: int = 1) -> float:
     width = _exp_interpolate(zoom, 10, 0.5, 16, 6, 1.2) * render_scale * STREET_PRINT_SCALE
-    return max(1, round(width))
+    return max(0.35, width)
 
 
-def _street_casing_width(zoom: int, render_scale: int = 1) -> int:
+def _street_casing_width(zoom: int, render_scale: int = 1) -> float:
     width = _exp_interpolate(zoom, 10, 1, 16, 8, 1.2) * render_scale * STREET_CASING_PRINT_SCALE
-    return max(1, round(width))
+    return max(0.5, width)
 
 
 def _waterway_line_width(zoom: int, render_scale: int = 1) -> int:
@@ -684,7 +784,7 @@ def _overlay_labels(
         font_size = _canvas_label_size(label_zoom, render_scale, "place", props.get("class"))
         base = placer.place(base, anchor, name, label_color, font_size)
 
-    if label_zoom >= ZOOM_LABELS_WATER_MIN:
+    if enabled.get("water", True) and label_zoom >= ZOOM_LABELS_WATER_MIN:
         for feature in _layer_features(decoded, "water_name"):
             props = feature.get("properties", {})
             if props.get("class") not in WATER_NAME_CLASSES:
@@ -740,54 +840,91 @@ def _render_vector_tile(
     opacity = palette.get("opacity", {})
     render_size = TILE_SIZE * render_scale
 
-    # Canvas uses land color; palette.background is stripe base-fill only.
     image = Image.new(
         "RGBA",
         (render_size, render_size),
-        _hex_to_rgba(palette.get("land") or palette.get("background", "#ffffff")),
+        _hex_to_rgba(map_canvas_color(palette)),
     )
 
-    # Land + water always painted; checkbox only sets palette.baseFill for stripes.
+    # Canvas uses land color; feature layers respect enabled toggles.
     land_color = palette.get("land", "#e8eddb")
     forest_color = palette.get("landForest", land_color)
     park_color = palette.get("landPark", land_color)
 
     for feature in _layer_features(decoded, "landcover"):
         props = feature.get("properties", {})
-        if props.get("class") not in LAND_FOREST_CLASSES:
-            continue
+        cls = props.get("class")
         geometry = _decode_feature_geometry(feature)
         if not geometry:
             continue
-        if props.get("class") in {"wood", "forest"}:
+
+        if cls in LAND_FOREST_CLASSES:
+            if not enabled.get("landForest", True):
+                continue
+            if cls in {"wood", "forest"}:
+                image = _draw_polygon_layer(
+                    image,
+                    geometry,
+                    forest_color,
+                    opacity.get("landForest", 0.85),
+                    render_size=render_size,
+                )
+            else:
+                image = _draw_polygon_layer(
+                    image,
+                    geometry,
+                    land_color,
+                    opacity.get("landGrass", 0.75),
+                    render_size=render_size,
+                )
+            continue
+
+        if cls in LAND_SNOW_CLASSES and enabled.get("snow", True):
             image = _draw_polygon_layer(
                 image,
                 geometry,
-                forest_color,
-                opacity.get("landForest", 0.85),
+                palette.get("snow", "#f0f4f8"),
+                opacity.get("snow", 0.95),
                 render_size=render_size,
             )
-        else:
+        elif cls in LAND_SAND_CLASSES and enabled.get("sand", True):
             image = _draw_polygon_layer(
                 image,
                 geometry,
-                land_color,
-                opacity.get("landGrass", 0.75),
+                palette.get("sand", "#e6d5a8"),
+                opacity.get("sand", 0.9),
+                render_size=render_size,
+            )
+        elif cls in LAND_ROCK_CLASSES and enabled.get("rock", True):
+            image = _draw_polygon_layer(
+                image,
+                geometry,
+                palette.get("rock", "#c2bdb6"),
+                opacity.get("rock", 0.9),
+                render_size=render_size,
+            )
+        elif cls in LAND_WETLAND_CLASSES and enabled.get("wetland", True):
+            image = _draw_polygon_layer(
+                image,
+                geometry,
+                palette.get("wetland", "#a8c4b0"),
+                opacity.get("wetland", 0.85),
                 render_size=render_size,
             )
 
-    for feature in _layer_features(decoded, "park"):
-        geometry = _decode_feature_geometry(feature)
-        if geometry:
-            image = _draw_polygon_layer(
-                image,
-                geometry,
-                park_color,
-                opacity.get("landPark", 0.8),
-                render_size=render_size,
-            )
+    if enabled.get("landForest", True):
+        for feature in _layer_features(decoded, "park"):
+            geometry = _decode_feature_geometry(feature)
+            if geometry:
+                image = _draw_polygon_layer(
+                    image,
+                    geometry,
+                    park_color,
+                    opacity.get("landPark", 0.8),
+                    render_size=render_size,
+                )
 
-    water_color = palette.get("water", "#9ebfff")
+    water_color = water_paint_color(palette)
     for feature in _layer_features(decoded, "water"):
         geometry = _decode_feature_geometry(feature)
         if geometry:
@@ -814,7 +951,7 @@ def _render_vector_tile(
 
         for feature in _layer_features(decoded, "transportation"):
             props = feature.get("properties", {})
-            if props.get("class") in STREET_EXCLUDE:
+            if not _is_street_feature(props):
                 continue
             geometry = _decode_feature_geometry(feature)
             if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
@@ -824,6 +961,20 @@ def _render_vector_tile(
             )
             image = _draw_line_layer(
                 image, geometry, street_color, street_width, 1.0, render_size=render_size
+            )
+
+    if enabled.get("rail", True):
+        rail_color = palette.get("rail", "#6a6a6a")
+        rail_width = max(0.35, _street_line_width(zoom, render_scale) * 0.45)
+        for feature in _layer_features(decoded, "transportation"):
+            props = feature.get("properties", {})
+            if not _is_rail_feature(props):
+                continue
+            geometry = _decode_feature_geometry(feature)
+            if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
+                continue
+            image = _draw_line_layer(
+                image, geometry, rail_color, rail_width, 1.0, render_size=render_size
             )
 
     # Built-up landuse follows the Buildings toggle; always drawn from ZOOM_BUILT_UP_MIN up.
@@ -1055,47 +1206,85 @@ def _render_decoded_geometry_to_canvas(
 
     tile = Image.new("RGBA", (tile_render_size, tile_render_size), (0, 0, 0, 0))
 
-    # Land + water always painted; checkbox only sets palette.baseFill for stripes.
+    # Canvas uses land color; feature layers respect enabled toggles.
     land_color = palette.get("land", "#e8eddb")
     forest_color = palette.get("landForest", land_color)
     park_color = palette.get("landPark", land_color)
 
     for feature in _layer_features(decoded, "landcover"):
         props = feature.get("properties", {})
-        if props.get("class") not in LAND_FOREST_CLASSES:
-            continue
+        cls = props.get("class")
         geometry = _decode_feature_geometry(feature)
         if not geometry:
             continue
-        if props.get("class") in {"wood", "forest"}:
+
+        if cls in LAND_FOREST_CLASSES:
+            if not enabled.get("landForest", True):
+                continue
+            if cls in {"wood", "forest"}:
+                tile = _draw_polygon_layer(
+                    tile,
+                    geometry,
+                    forest_color,
+                    opacity.get("landForest", 0.85),
+                    render_size=tile_render_size,
+                )
+            else:
+                tile = _draw_polygon_layer(
+                    tile,
+                    geometry,
+                    land_color,
+                    opacity.get("landGrass", 0.75),
+                    render_size=tile_render_size,
+                )
+            continue
+
+        if cls in LAND_SNOW_CLASSES and enabled.get("snow", True):
             tile = _draw_polygon_layer(
                 tile,
                 geometry,
-                forest_color,
-                opacity.get("landForest", 0.85),
+                palette.get("snow", "#f0f4f8"),
+                opacity.get("snow", 0.95),
                 render_size=tile_render_size,
             )
-        else:
+        elif cls in LAND_SAND_CLASSES and enabled.get("sand", True):
             tile = _draw_polygon_layer(
                 tile,
                 geometry,
-                land_color,
-                opacity.get("landGrass", 0.75),
+                palette.get("sand", "#e6d5a8"),
+                opacity.get("sand", 0.9),
+                render_size=tile_render_size,
+            )
+        elif cls in LAND_ROCK_CLASSES and enabled.get("rock", True):
+            tile = _draw_polygon_layer(
+                tile,
+                geometry,
+                palette.get("rock", "#c2bdb6"),
+                opacity.get("rock", 0.9),
+                render_size=tile_render_size,
+            )
+        elif cls in LAND_WETLAND_CLASSES and enabled.get("wetland", True):
+            tile = _draw_polygon_layer(
+                tile,
+                geometry,
+                palette.get("wetland", "#a8c4b0"),
+                opacity.get("wetland", 0.85),
                 render_size=tile_render_size,
             )
 
-    for feature in _layer_features(decoded, "park"):
-        geometry = _decode_feature_geometry(feature)
-        if geometry:
-            tile = _draw_polygon_layer(
-                tile,
-                geometry,
-                park_color,
-                opacity.get("landPark", 0.8),
-                render_size=tile_render_size,
-            )
+    if enabled.get("landForest", True):
+        for feature in _layer_features(decoded, "park"):
+            geometry = _decode_feature_geometry(feature)
+            if geometry:
+                tile = _draw_polygon_layer(
+                    tile,
+                    geometry,
+                    park_color,
+                    opacity.get("landPark", 0.8),
+                    render_size=tile_render_size,
+                )
 
-    water_color = palette.get("water", "#9ebfff")
+    water_color = water_paint_color(palette)
     for feature in _layer_features(decoded, "water"):
         geometry = _decode_feature_geometry(feature)
         if geometry:
@@ -1122,7 +1311,7 @@ def _render_decoded_geometry_to_canvas(
 
         for feature in _layer_features(decoded, "transportation"):
             props = feature.get("properties", {})
-            if props.get("class") in STREET_EXCLUDE:
+            if not _is_street_feature(props):
                 continue
             geometry = _decode_feature_geometry(feature)
             if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
@@ -1140,6 +1329,25 @@ def _render_decoded_geometry_to_canvas(
                 geometry,
                 street_color,
                 street_width,
+                1.0,
+                render_size=tile_render_size,
+            )
+
+    if enabled.get("rail", True):
+        rail_color = palette.get("rail", "#6a6a6a")
+        rail_width = max(0.35, _street_line_width(zoom, render_scale) * 0.45)
+        for feature in _layer_features(decoded, "transportation"):
+            props = feature.get("properties", {})
+            if not _is_rail_feature(props):
+                continue
+            geometry = _decode_feature_geometry(feature)
+            if not geometry or geometry["type"] not in {"LineString", "MultiLineString"}:
+                continue
+            tile = _draw_line_layer(
+                tile,
+                geometry,
+                rail_color,
+                rail_width,
                 1.0,
                 render_size=tile_render_size,
             )
@@ -1235,7 +1443,7 @@ def _overlay_labels_world(
         if len(placer._boxes) > before:
             placed_names.add(name)
 
-    if label_zoom >= ZOOM_LABELS_WATER_MIN:
+    if enabled.get("water", True) and label_zoom >= ZOOM_LABELS_WATER_MIN:
         for tile_x, tile_y, decoded in decoded_tiles:
             for feature in _layer_features(decoded, "water_name"):
                 props = feature.get("properties", {})
@@ -1305,10 +1513,7 @@ def _render_world_canvas(
     canvas = Image.new(
         "RGBA",
         (work_manifest["tileCols"] * tile_render_size, work_manifest["tileRows"] * tile_render_size),
-        # Land always fills the map; background is stripe base-fill only.
-        _hex_to_rgba(
-            render_palette.get("land") or render_palette.get("background", "#ffffff")
-        ),
+        _hex_to_rgba(map_canvas_color(render_palette)),
     )
 
     decoded_tiles: list[tuple[int, int, dict[str, Any]]] = []

@@ -21,6 +21,7 @@
 		StepUnit
 	} from '@lib/types';
 	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
+	import { getBaseFillColor, getMapCanvasColor } from '@shared/map-style';
 	import { clampTileZoom, MAX_SIDE_METERS } from '@shared/tile-constants';
 
 	const MIN_SIDE_METERS = 500;
@@ -62,7 +63,9 @@
 	let center = $state<LatLng | null>(null);
 	let placeName = $state<string | null>(null);
 	let sideMeters = $state(2500);
-	let mode = $state<JobMode>('globe');
+	let mode = $state<JobMode>('map');
+	/** Actual mode of the open job (UI `mode` can switch for globe preview). */
+	let jobMode = $state<JobMode | null>(null);
 	let squareSidePx = $state(DEFAULT_SQUARE_SIDE_PX);
 	let stripes = $state(12);
 	let diameterCm = $state(25);
@@ -110,7 +113,7 @@
 		void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
-	function applyJobSnapshot(job: JobResponse) {
+	function applyJobSnapshot(job: JobResponse, options?: { syncMode?: boolean }) {
 		jobId = job.id;
 		jobStatus = job.status;
 		jobProgress = job.progress;
@@ -126,7 +129,11 @@
 		if (job.downloadFilename) downloadFilename = job.downloadFilename;
 		else if (job.status === 'complete' && !artifactsAvailable) downloadFilename = null;
 
-		if (job.mode === 'map' || job.mode === 'globe') mode = job.mode;
+		if (job.mode === 'map' || job.mode === 'globe') {
+			jobMode = job.mode;
+			// Sync UI mode when opening a job; skip on poll so Map→Globe preview works.
+			if (options?.syncMode) mode = job.mode;
+		}
 		if (job.squareSidePx != null) squareSidePx = job.squareSidePx;
 		if (job.stripeCount != null) stripes = job.stripeCount;
 		if (job.stripes != null) stripes = job.stripes;
@@ -168,7 +175,7 @@
 		try {
 			const job = await getJob(jobKey);
 			if (epoch !== pollEpoch) return;
-			applyJobSnapshot(job);
+			applyJobSnapshot(job, { syncMode: true });
 			if (options?.scroll !== false) {
 				if (job.files?.length) void scrollToJobOutputs();
 				else void scrollToJobSection();
@@ -355,6 +362,7 @@
 		jobProgress = 0;
 		jobId = null;
 		jobFiles = [];
+		jobMode = mode;
 		artifactsAvailable = true;
 		jobUpdatedAt = null;
 		downloadFilename = null;
@@ -419,8 +427,8 @@
 					status={jobStatus}
 					progress={jobProgress}
 					manifest={jobManifest}
-					{mode}
-					stripeCount={mode === 'globe' ? stripes : 0}
+					mode={jobMode ?? mode}
+					stripeCount={(jobMode ?? mode) === 'globe' ? stripes : 0}
 					error={jobError}
 					stepCurrent={jobStepCurrent}
 					stepTotal={jobStepTotal}
@@ -441,10 +449,6 @@
 		</section>
 
 		<aside class="space-y-4">
-			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
-				<MapLayerControls bind:value={mapLayers} />
-			</div>
-
 			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
 				<h2 class="mb-4 text-lg font-medium text-stone-900">Settings</h2>
 
@@ -658,6 +662,10 @@
 					<p class="text-sm text-stone-400">Calculating…</p>
 				{/if}
 			</div>
+
+			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
+				<MapLayerControls bind:value={mapLayers} />
+			</div>
 		</aside>
 	</div>
 
@@ -671,6 +679,8 @@
 			revision={jobUpdatedAt}
 			{artifactsAvailable}
 			{outputFormat}
+			mapCanvasColor={getMapCanvasColor(mapLayers)}
+			emptyFillColor={getBaseFillColor(mapLayers)}
 			visible={true}
 		/>
 	{/if}

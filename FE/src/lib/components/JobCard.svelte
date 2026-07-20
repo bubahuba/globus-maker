@@ -182,8 +182,8 @@
 			projecting: `Cutting ${stripeCount} stripes for your globe.`,
 			packaging:
 				mode === 'map'
-					? 'Creating the zip with your map image.'
-					: 'Creating the zip with the map and all stripe images.',
+					? 'Creating the zip with your map.'
+					: 'Creating the zip with the map, prewarped SVG, and stripe images.',
 			complete: 'Processing finished.',
 			failed: 'Processing stopped before completion.'
 		};

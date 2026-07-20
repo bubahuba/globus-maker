@@ -9,7 +9,7 @@
 		updateMapStyle,
 		type MapSelection
 	} from '@lib/map/leaflet';
-	import type { MapLayerStyle } from '@shared/map-style';
+	import { MAP_LAYER_KEYS, type MapLayerStyle } from '@shared/map-style';
 
 	interface Props {
 		center?: { lat: number; lng: number } | null;
@@ -21,8 +21,8 @@
 	let { center = null, sideMeters = 2500, mapLayers, onchange }: Props = $props();
 
 	let mapEl: HTMLDivElement | undefined = $state();
-	let map: import('leaflet').Map | undefined;
-	let baseLayer: ReturnType<typeof initMap>['baseLayer'] | undefined;
+	let map: import('leaflet').Map | undefined = $state();
+	let baseLayer: ReturnType<typeof initMap>['baseLayer'] | undefined = $state();
 	let square: import('leaflet').Rectangle | undefined;
 	let marker: import('leaflet').Marker | undefined;
 
@@ -104,7 +104,12 @@
 	});
 
 	$effect(() => {
-		mapLayers;
+		mapLayers.baseFill;
+		mapLayers.landFill;
+		for (const key of MAP_LAYER_KEYS) {
+			mapLayers[key].enabled;
+			mapLayers[key].color;
+		}
 		if (baseLayer) updateMapStyle(baseLayer, mapLayers);
 	});
 

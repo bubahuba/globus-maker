@@ -63,9 +63,15 @@ export function initMap(
 }
 
 export function updateMapStyle(baseLayer: MaplibreGlLayer, mapLayers: MapLayerStyle): void {
-	baseLayer
-		.getMaplibreMap()
-		.setStyle(buildMapStyle(mapLayers) as import('maplibre-gl').StyleSpecification);
+	const map = baseLayer.getMaplibreMap();
+	const style = buildMapStyle(mapLayers) as import('maplibre-gl').StyleSpecification;
+	const apply = () => {
+		// Diff updates visibility/paint; buildMapStyle always emits explicit
+		// layout.visibility so off→on toggles are not stuck at "none".
+		map.setStyle(style, { diff: true });
+	};
+	if (map.isStyleLoaded()) apply();
+	else map.once('load', apply);
 }
 
 export function createSquareLayer(bounds: L.LatLngBounds): L.Rectangle {

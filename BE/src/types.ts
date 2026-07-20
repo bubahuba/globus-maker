@@ -7,16 +7,29 @@ export interface LatLng {
   lng: number;
 }
 
-export type MapLayerKey = "water" | "streets" | "streetNames" | "buildings" | "landForest";
+export type MapLayerKey =
+  | "water"
+  | "streets"
+  | "streetNames"
+  | "buildings"
+  | "landForest"
+  | "snow"
+  | "sand"
+  | "rock"
+  | "wetland"
+  | "rail";
 
 export interface MapLayerSettings {
   enabled: boolean;
   color: string;
 }
 
-export type MapLayerStyle = Record<MapLayerKey, MapLayerSettings>;
+export type MapLayerStyle = {
+  baseFill: MapLayerKey;
+  landFill: MapLayerKey;
+} & Record<MapLayerKey, MapLayerSettings>;
 
-/** Map = square export only; Globe = prewarp + JPEG stripes via slize.pl. */
+/** Map = square export; Globe = prewarp + JPEG stripes via slize.pl (+ sphere from input.svg). */
 export type JobMode = "map" | "globe";
 
 /** Artifact format for the square map (Map mode) or forced jpg for Globe stripes. */

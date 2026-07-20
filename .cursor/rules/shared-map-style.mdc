@@ -10,11 +10,19 @@ Single source of truth for map layer configuration used by FE preview and proces
 
 ## Layer keys (UI toggles)
 
-`landForest`, `water`, `streets`, `buildings`, `streetNames`
+`landForest`, `snow`, `sand`, `rock`, `wetland`, `water`, `streets`, `rail`, `buildings`, `streetNames`
 
 Grouped for the FE via `MAP_LAYER_GROUPS` (land / water / transport / settlement / labels).
 
-**Land / water:** always painted. Their `enabled` flag is mutually exclusive and selects the **base fill** color (map background + empty stripe space). Default base: land. Use `getBaseFillLayer` / `withBaseFillLayer` / `ensureBaseFill`.
+**Empty fill:** `MapLayerStyle.baseFill` — stripe / projection empty space; when Water is off, also paints water geometry (seas). Helpers: `getBaseFillLayer` / `getBaseFillColor` / `withBaseFillLayer` / `getWaterPaintColor`.
+
+**Base land fill:** `MapLayerStyle.landFill` — continents / shore (MapLibre + SVG canvas while land is on, open landcover, globe silhouette). Helpers: `getLandFillLayer` / `getLandFillColor` / `withLandFillLayer` / `getMapCanvasColor`. `ensureBaseFill` validates both selects.
+
+**Land:** visibility toggle. **Water:** off does not hide seas — recolors them to Empty fill; labels still hide.
+
+**Natural landcover toggles:** `snow` (OMT `ice`), `sand`, `rock`, `wetland`.
+
+**Transport:** `streets` (roads) and `rail` (rail / transit subclasses).
 
 ## Zoom bands (`OSM_ZOOM`)
 
@@ -28,7 +36,7 @@ Developer-defined (not user-editable). Keep `container/tile_render.py` constants
 | Water labels | z9+ |
 | Waterway labels | z10+ |
 | Park labels | z11+ |
-| Street labels | z13+ |
+| Street labels | z12+ |
 
 ## Key exports
 

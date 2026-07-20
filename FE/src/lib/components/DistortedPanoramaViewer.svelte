@@ -10,9 +10,15 @@
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
 		src: string;
 		title?: string;
+		/** Three.js scene + container background (Empty fill hex). */
+		backgroundColor?: string;
 	}
 
-	let { src, title = 'Sphere preview' }: Props = $props();
+	let {
+		src,
+		title = 'Sphere preview',
+		backgroundColor = '#f5f5f4'
+	}: Props = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 	let statusMessage = $state('Loading sphere preview…');
@@ -22,6 +28,7 @@
 
 	let loadedKey = '';
 	let renderer: THREE.WebGLRenderer | null = null;
+	let scene: THREE.Scene | null = null;
 	let animationId = 0;
 	let resizeObserver: ResizeObserver | null = null;
 	let sceneResources: {
@@ -46,6 +53,7 @@
 			sceneResources.texture.dispose();
 			sceneResources = null;
 		}
+		scene = null;
 		if (renderer) {
 			renderer.dispose();
 			renderer.domElement.remove();
@@ -87,8 +95,9 @@
 
 		const texture = await loadTexture(url);
 
-		const scene = new THREE.Scene();
-		scene.background = new THREE.Color(0xf5f5f4);
+		const nextScene = new THREE.Scene();
+		nextScene.background = new THREE.Color(backgroundColor);
+		scene = nextScene;
 
 		const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
 		camera.position.set(0, 0.35, 2.6);
@@ -103,7 +112,7 @@
 		const geometry = new THREE.SphereGeometry(1, 96, 64);
 		const material = new THREE.MeshBasicMaterial({ map: texture });
 		const globe = new THREE.Mesh(geometry, material);
-		scene.add(globe);
+		nextScene.add(globe);
 
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
@@ -130,7 +139,7 @@
 			animationId = requestAnimationFrame(tick);
 			globe.rotation.y += 0.0015;
 			controls.update();
-			webgl.render(scene, camera);
+			webgl.render(nextScene, camera);
 		};
 		tick();
 
@@ -164,6 +173,14 @@
 		};
 	});
 
+	/** Update scene clear color without remounting / reloading the texture. */
+	$effect(() => {
+		const color = backgroundColor;
+		if (scene) {
+			scene.background = new THREE.Color(color);
+		}
+	});
+
 	onDestroy(() => {
 		disposeViewer();
 		loadedKey = '';
@@ -174,12 +191,14 @@
 	<div class="relative h-[min(50vh,28rem)] w-full">
 		<div
 			bind:this={container}
-			class="h-full w-full overflow-hidden rounded-lg bg-stone-100 ring-1 ring-stone-200"
+			class="h-full w-full overflow-hidden rounded-lg ring-1 ring-stone-200"
+			style:background-color={backgroundColor}
 			aria-label={title}
 		></div>
 		{#if statusMessage}
 			<p
-				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-stone-100/95 px-4 text-center text-sm text-amber-800 ring-1 ring-stone-200"
+				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg px-4 text-center text-sm text-amber-800 ring-1 ring-stone-200"
+				style:background-color={backgroundColor}
 			>
 				{statusMessage}
 			</p>
