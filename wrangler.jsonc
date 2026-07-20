@@ -22,6 +22,8 @@
     {
       "class_name": "GlobusProcessor",
       "image": "./container/Dockerfile",
+      // SVG stitch + light JPEG work — 4 GiB RAM / 8 GB disk is enough.
+      "instance_type": "standard-1",
       "max_instances": 3
     }
   ],

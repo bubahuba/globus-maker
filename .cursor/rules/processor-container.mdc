@@ -29,8 +29,8 @@ Always:
 
 2. DePolar sphere preview from `input.svg` → `input-distorted-preview.jpg`
 3. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg` + raster `input-distorted.jpg`
-4. Pole caps sheet from prewarped centre → `pole-caps.jpg` (north map circle + empty-fill circle, white outside; print-scaled, slightly enlarged)
-5. `slize.pl` → `out-*.jpg` stripes
+4. Pole caps sheet from prewarped centre → `pole-caps.jpg` (north map + empty-fill south; yellow cut circle + centre mark; mask bleeds past cut line; white outside)
+5. `slize.pl` → `out-*.jpg` stripes; yellow lens cut-line overlay (slightly oversized for neighbour overlap)
 6. Zip `input.svg` + `input-distorted.svg` + `pole-caps.jpg` + stripe JPGs → return
 
 Legacy bitmap helpers (`tile_render.py` Pillow path, `stitch.py`, `distort.spherical_prewarp`, SVG `project_all_stripes`) remain for tests but are not used by `process_job`.

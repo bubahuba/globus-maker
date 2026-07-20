@@ -15,12 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
-    # Large globe rasterization needs headroom; allow SVG read for stripe montage.
+    # SVG-first pipeline fits on standard-1 (4 GiB); allow SVG read for montage.
     && sed -i \
-      -e 's/name="memory" value="[^"]*"/name="memory" value="8GiB"/' \
-      -e 's/name="map" value="[^"]*"/name="map" value="16GiB"/' \
-      -e 's/name="area" value="[^"]*"/name="area" value="1GP"/' \
-      -e 's/name="disk" value="[^"]*"/name="disk" value="16GiB"/' \
+      -e 's/name="memory" value="[^"]*"/name="memory" value="2GiB"/' \
+      -e 's/name="map" value="[^"]*"/name="map" value="4GiB"/' \
+      -e 's/name="area" value="[^"]*"/name="area" value="500MP"/' \
+      -e 's/name="disk" value="[^"]*"/name="disk" value="6GiB"/' \
       -e 's/rights="none" pattern="SVG"/rights="read|write" pattern="SVG"/' \
       -e 's/rights="none" pattern="MSVG"/rights="read|write" pattern="MSVG"/' \
       -e 's/rights="none" pattern="MVG"/rights="read|write" pattern="MVG"/' \

@@ -38,8 +38,8 @@ description: Understand and modify the Globus Maker job pipeline from map select
 2. **Map** — optional SVG→JPEG; **packaging** zip (`input.svg`/`input.jpg`); done
 3. **Globe** — DePolar sphere from `input.svg` → `input-distorted-preview.jpg`
 4. **Globe** — BarrelInverse prewarp → `input-distorted.svg` + raster `input-distorted.jpg`
-5. **Globe** — Pole caps sheet → `pole-caps.jpg` (north map circle + empty-fill circle on white; print-scaled, slightly enlarged)
-6. **projecting** — `slize.pl` → `out-*.jpg`
+5. **Globe** — Pole caps sheet → `pole-caps.jpg` (north map + empty-fill south; yellow cut circle + centre mark; mask bleeds past cut line)
+6. **projecting** — `slize.pl` → `out-*.jpg`, then yellow lens cut-line overlay (slightly fattened for neighbour glue overlap)
 7. **packaging** — zip `input.svg` + `input-distorted.svg` + `pole-caps.jpg` + stripe JPGs
 8. API stores zip in R2, marks **complete**
 
@@ -59,5 +59,6 @@ Run `npm test` after tile-math changes.
 | Zoom/tile limits | `BE/src/osm/tile-math.ts` |
 | Map appearance | `shared/map-style.ts`, `container/svg_map.py` |
 | Stripe geometry | `container/slize.pl`, `process.py` |
+| Stripe cut-line | `container/distort.py` (`draw_stripe_cut_line`), `process.py` |
 | Pole caps | `container/distort.py` (`build_pole_caps`), `process.py` |
 | Job storage | `BE/src/jobs/store.ts`, `artifacts.ts` |

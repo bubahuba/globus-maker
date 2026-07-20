@@ -321,8 +321,9 @@
 						<h3 class="text-base font-medium text-stone-900">Pole caps</h3>
 						<p class="text-sm text-stone-500">
 							Two circles side by side — north (map from the prewarped centre) and south (empty
-							fill only), with white outside the masks. Same diameter, sized to glue over the
-							stripe tips.
+							fill only), with white outside the masks. Each has a yellow cut circle at the cap
+							diameter and a small yellow centre mark; the printed mask bleeds slightly past the
+							cut line.
 						</p>
 						{#if poleCapsFile}
 							<img

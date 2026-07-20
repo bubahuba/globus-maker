@@ -12,6 +12,7 @@ from distort import (
     SPHERE_PREVIEW_MAX_EDGE,
     build_depolar_sphere_preview,
     build_pole_caps,
+    draw_stripe_cut_line,
     rasterize_svg,
 )
 from job_queue import JobCancelled
@@ -236,6 +237,15 @@ async def run_slize(
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(work_dir))
     last_reported = -1
     uploaded: set[str] = set()
+    cut_lined: set[str] = set()
+
+    async def finalize_stripe(path: Path) -> Path:
+        """Draw the yellow lens cut guide once the JPEG is fully written."""
+        if path.name in cut_lined:
+            return path
+        await asyncio.to_thread(draw_stripe_cut_line, path)
+        cut_lined.add(path.name)
+        return path
 
     async def publish_ready(paths: list[Path], *, include_newest: bool) -> None:
         if not on_stripe_ready or not paths:
@@ -244,6 +254,7 @@ async def run_slize(
         for path in candidates:
             if path.name in uploaded:
                 continue
+            await finalize_stripe(path)
             ok = await on_stripe_ready(path)
             if ok is False:
                 continue
@@ -277,8 +288,9 @@ async def run_slize(
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
     stripe_files = sorted(work_dir.glob("out-*.jpg"))
-    if on_stripe_ready:
-        for path in stripe_files:
+    for path in stripe_files:
+        await finalize_stripe(path)
+        if on_stripe_ready and path.name not in uploaded:
             await on_stripe_ready(path)
             uploaded.add(path.name)
     if on_progress:
