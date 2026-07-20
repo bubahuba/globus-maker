@@ -1,6 +1,7 @@
 export type MapLayerKey =
   | "water"
   | "streets"
+  | "airports"
   | "streetNames"
   | "buildings"
   | "landForest"
@@ -39,10 +40,23 @@ export const OSM_ZOOM = {
   builtUpMin: 10,
   buildingsMin: 12,
   labelsPlacesMin: 3,
+  labelsTownsMin: 6,
+  labelsVillagesMin: 9,
+  /**
+   * Districts / boroughs in OMT `place` tiles (suburb, neighbourhood, quarter).
+   * Data starts at z11. maplibre-gl-leaflet uses ML zoom = Leaflet−1, so Leaflet
+   * z11 loads z10 tiles — FE fills that gap via `place-overzoom` GeoJSON.
+   */
+  labelsSuburbsMin: 11,
   labelsWaterMin: 9,
   labelsWaterwayMin: 10,
   labelsParkMin: 11,
-  labelsStreetsMin: 12,
+  /** MapLibre zoom (Leaflet UI zoom − 1). 10 ≈ Leaflet UI zoom 11. */
+  labelsStreetsMin: 10,
+  /** Motorway / trunk / primary route shields (D1, R7, …). */
+  labelsHighwayRefsMin: 8,
+  /** Aeroway polygons/lines + aerodrome labels (OMT `aeroway` / `aerodrome_label`). */
+  aerowaysMin: 10,
 } as const;
 
 export const MAP_LAYER_KEYS: MapLayerKey[] = [
@@ -53,6 +67,7 @@ export const MAP_LAYER_KEYS: MapLayerKey[] = [
   "wetland",
   "water",
   "streets",
+  "airports",
   "rail",
   "buildings",
   "streetNames",
@@ -66,6 +81,7 @@ export const MAP_LAYER_LABELS: Record<MapLayerKey, string> = {
   wetland: "Wetland",
   water: "Water",
   streets: "Streets",
+  airports: "Airports",
   rail: "Rail",
   buildings: "Buildings",
   streetNames: "Labels",
@@ -74,7 +90,7 @@ export const MAP_LAYER_LABELS: Record<MapLayerKey, string> = {
 export const MAP_LAYER_GROUPS: MapLayerGroup[] = [
   { id: "land", label: "Land", keys: ["landForest", "snow", "sand", "rock", "wetland"] },
   { id: "water", label: "Water", keys: ["water"] },
-  { id: "transport", label: "Transport", keys: ["streets", "rail"] },
+  { id: "transport", label: "Transport", keys: ["streets", "airports", "rail"] },
   { id: "settlement", label: "Buildings", keys: ["buildings"] },
   { id: "labels", label: "Labels", keys: ["streetNames"] },
 ];
@@ -89,6 +105,8 @@ export interface OsmStyleLayerDef {
   id: string;
   /** UI toggle that owns this layer; null = always on */
   group: MapLayerKey | null;
+  /** Defaults to the OpenMapTiles vector source. */
+  source?: string;
   sourceLayer?: string;
   type: OsmLayerType;
   minzoom?: number;
@@ -100,7 +118,18 @@ export interface OsmStyleLayerDef {
   };
 }
 
-const LABEL_TEXT_FIELD = ["coalesce", ["get", "name"], ["get", "name:latin"], ["get", "name_en"], ""];
+/** GeoJSON source filled by FE when ML zoom is 10 (Leaflet UI zoom 11). */
+export const PLACE_OVERZOOM_SOURCE = "place-overzoom";
+
+const LABEL_TEXT_FIELD = ["coalesce", ["get", "name"], ["get", "name:latin"], ["get", "name_en"]];
+
+const PLACE_NAME_FIELD = [
+  "coalesce",
+  ["get", "name"],
+  ["get", "name:latin"],
+  ["get", "name_en"],
+  ["get", "name_int"],
+];
 
 const RAIL_SUBCLASSES = [
   "rail",
@@ -145,17 +174,26 @@ const BUILT_UP_FILTER: unknown = [
 function labelStyle(
   color: string,
   options?: {
-    placement?: "point" | "line";
+    placement?: "point" | "line" | unknown;
     size?: unknown;
+    textField?: unknown;
+    padding?: number;
+    font?: string[];
+    /** When true, label may overlap others (use for sparse place tiers). */
+    allowOverlap?: boolean;
   },
 ): { layout: Record<string, unknown>; paint: Record<string, unknown> } {
   return {
     layout: {
       "symbol-placement": options?.placement ?? "point",
-      "text-field": LABEL_TEXT_FIELD,
-      "text-font": ["Noto Sans Regular"],
+      "text-field": options?.textField ?? LABEL_TEXT_FIELD,
+      "text-font": options?.font ?? ["Noto Sans Regular"],
       "text-size": options?.size ?? ["interpolate", ["linear"], ["zoom"], 8, 10, 14, 13],
       "text-max-width": 8,
+      ...(options?.padding != null ? { "text-padding": options.padding } : {}),
+      ...(options?.allowOverlap
+        ? { "text-allow-overlap": true, "text-ignore-placement": true }
+        : {}),
     },
     paint: {
       "text-color": color,
@@ -179,6 +217,7 @@ export const DEFAULT_MAP_LAYER_SETTINGS: Record<MapLayerKey, MapLayerSettings> =
   wetland: { enabled: true, color: "#a8c4b0" },
   water: { enabled: true, color: "#9ebfff" },
   streets: { enabled: true, color: "#ffffff" },
+  airports: { enabled: true, color: "#d4cfc6" },
   rail: { enabled: true, color: "#6a6a6a" },
   buildings: { enabled: true, color: "#d9d5d0" },
   streetNames: { enabled: true, color: "#555555" },
@@ -485,6 +524,58 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     }),
   },
   {
+    id: "aeroway-fill",
+    group: "airports",
+    sourceLayer: "aeroway",
+    type: "fill",
+    minzoom: OSM_ZOOM.aerowaysMin,
+    filter: ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false],
+    style: ({ layers }) => ({
+      paint: {
+        "fill-color": layers.airports.color,
+        "fill-opacity": 0.75,
+      },
+    }),
+  },
+  {
+    id: "aeroway-runway",
+    group: "airports",
+    sourceLayer: "aeroway",
+    type: "line",
+    minzoom: OSM_ZOOM.aerowaysMin,
+    filter: [
+      "all",
+      ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+      ["==", ["get", "class"], "runway"],
+    ],
+    style: ({ layers }) => ({
+      layout: { "line-cap": "butt", "line-join": "miter" },
+      paint: {
+        "line-color": lighten(layers.airports.color, 0.12),
+        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 2, 16, 12],
+      },
+    }),
+  },
+  {
+    id: "aeroway-taxiway",
+    group: "airports",
+    sourceLayer: "aeroway",
+    type: "line",
+    minzoom: OSM_ZOOM.aerowaysMin,
+    filter: [
+      "all",
+      ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+      ["==", ["get", "class"], "taxiway"],
+    ],
+    style: ({ layers }) => ({
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": lighten(layers.airports.color, 0.08),
+        "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.5, 16, 4],
+      },
+    }),
+  },
+  {
     id: "streets-casing",
     group: "streets",
     sourceLayer: "transportation",
@@ -612,25 +703,6 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     }),
   },
   {
-    id: "labels-places",
-    group: "streetNames",
-    sourceLayer: "place",
-    type: "symbol",
-    minzoom: OSM_ZOOM.labelsPlacesMin,
-    style: ({ layers }) =>
-      labelStyle(layers.streetNames.color, {
-        size: [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          4,
-          ["match", ["get", "class"], "country", 13, "state", 11, "city", 10, 9],
-          12,
-          ["match", ["get", "class"], "country", 18, "state", 14, "city", 13, 11],
-        ],
-      }),
-  },
-  {
     id: "labels-water",
     group: "water",
     sourceLayer: "water_name",
@@ -665,15 +737,149 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     style: ({ layers }) => labelStyle(layers.streetNames.color, { size: 10 }),
   },
   {
+    id: "labels-aerodrome",
+    group: "airports",
+    sourceLayer: "aerodrome_label",
+    type: "symbol",
+    minzoom: OSM_ZOOM.aerowaysMin,
+    filter: ["any", ["has", "iata"], ["==", ["get", "class"], "international"]],
+    style: ({ layers }) =>
+      labelStyle(darken(layers.airports.color, 0.45), {
+        textField: [
+          "coalesce",
+          ["get", "iata"],
+          ["get", "name"],
+          ["get", "name:latin"],
+          ["get", "name_en"],
+        ],
+        padding: 2,
+        size: ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 13],
+      }),
+  },
+  {
+    id: "labels-highway-refs",
+    group: "streetNames",
+    sourceLayer: "transportation_name",
+    type: "symbol",
+    minzoom: OSM_ZOOM.labelsHighwayRefsMin,
+    filter: [
+      "all",
+      ["has", "ref"],
+      ["match", ["get", "class"], ["motorway", "trunk", "primary"], true, false],
+      ["!=", ["get", "subclass"], "junction"],
+    ],
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        // Point at low zoom (short shield segments); along the road from z11.
+        placement: ["step", ["zoom"], "point", 11, "line"],
+        textField: ["to-string", ["get", "ref"]],
+        padding: 2,
+        size: ["interpolate", ["linear"], ["zoom"], 8, 9, 14, 11],
+      }),
+  },
+  {
     id: "labels-streets",
     group: "streetNames",
     sourceLayer: "transportation_name",
     type: "symbol",
     minzoom: OSM_ZOOM.labelsStreetsMin,
+    // Named road lines only — skip motorway exits (crowd labels) and bare refs
+    // (shown via labels-highway-refs). Local street names densify from z12 in OMT.
+    filter: [
+      "all",
+      ["!=", ["get", "subclass"], "junction"],
+      ["has", "name"],
+      ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+    ],
     style: ({ layers }) =>
       labelStyle(layers.streetNames.color, {
         placement: "line",
-        size: ["interpolate", ["linear"], ["zoom"], 13, 9, 18, 12],
+        size: ["interpolate", ["linear"], ["zoom"], 11, 9, 18, 12],
+      }),
+  },
+  // Place labels last (above roads), matching OpenFreeMap Liberty — top symbol
+  // layers win collision placement, so suburbs must not sit under highway labels.
+  {
+    id: "labels-place-village",
+    group: "streetNames",
+    sourceLayer: "place",
+    type: "symbol",
+    minzoom: OSM_ZOOM.labelsVillagesMin,
+    filter: ["==", ["get", "class"], "village"],
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        textField: PLACE_NAME_FIELD,
+        padding: 1.5,
+        size: ["interpolate", ["linear"], ["zoom"], 9, 10, 12, 12],
+      }),
+  },
+  {
+    id: "labels-place-suburb",
+    group: "streetNames",
+    sourceLayer: "place",
+    type: "symbol",
+    minzoom: OSM_ZOOM.labelsSuburbsMin,
+    filter: [
+      "match",
+      ["get", "class"],
+      "suburb",
+      true,
+      "neighbourhood",
+      true,
+      "quarter",
+      true,
+      false,
+    ],
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        textField: PLACE_NAME_FIELD,
+        padding: 1,
+        allowOverlap: true,
+        size: ["interpolate", ["linear"], ["zoom"], 11, 12, 14, 14],
+      }),
+  },
+  {
+    // Leaflet z11 → MapLibre z10 tiles omit suburbs; FE injects z11 place points.
+    id: "labels-place-suburb-overzoom",
+    group: "streetNames",
+    source: PLACE_OVERZOOM_SOURCE,
+    type: "symbol",
+    minzoom: 10,
+    maxzoom: 11,
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        textField: ["get", "name"],
+        padding: 1,
+        allowOverlap: true,
+        size: 12,
+      }),
+  },
+  {
+    id: "labels-place-town",
+    group: "streetNames",
+    sourceLayer: "place",
+    type: "symbol",
+    minzoom: OSM_ZOOM.labelsTownsMin,
+    filter: ["==", ["get", "class"], "town"],
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        textField: PLACE_NAME_FIELD,
+        padding: 2,
+        size: ["interpolate", ["exponential", 1.2], ["zoom"], 7, 11, 11, 13],
+      }),
+  },
+  {
+    id: "labels-place-city",
+    group: "streetNames",
+    sourceLayer: "place",
+    type: "symbol",
+    minzoom: OSM_ZOOM.labelsPlacesMin,
+    filter: ["==", ["get", "class"], "city"],
+    style: ({ layers }) =>
+      labelStyle(layers.streetNames.color, {
+        textField: PLACE_NAME_FIELD,
+        padding: 2,
+        size: ["interpolate", ["exponential", 1.2], ["zoom"], 4, 11, 7, 13, 11, 16],
       }),
   },
 ];
@@ -683,7 +889,9 @@ export function layerZoomHint(key: MapLayerKey): string | null {
     case "buildings":
       return `Built-up areas from z${OSM_ZOOM.builtUpMin}; building footprints from z${OSM_ZOOM.buildingsMin}`;
     case "streetNames":
-      return `Places from z${OSM_ZOOM.labelsPlacesMin}; parks z${OSM_ZOOM.labelsParkMin}; streets from z${OSM_ZOOM.labelsStreetsMin}`;
+      return `Cities z${OSM_ZOOM.labelsPlacesMin}+; suburbs from z11; road names z${OSM_ZOOM.labelsStreetsMin}+ (local streets denser from z12)`;
+    case "airports":
+      return `Runways / taxiways / IATA labels from z${OSM_ZOOM.aerowaysMin}`;
     case "water":
       return `Bodies/labels from z${OSM_ZOOM.labelsWaterMin}; off → seas use Empty fill color`;
     default:
@@ -699,7 +907,7 @@ function emitStyleLayer(def: OsmStyleLayerDef, ctx: StyleBuildContext): Record<s
   };
 
   if (def.type !== "background") {
-    layer.source = VECTOR_SOURCE;
+    layer.source = def.source ?? VECTOR_SOURCE;
     if (def.sourceLayer) layer["source-layer"] = def.sourceLayer;
   }
   if (def.minzoom != null) layer.minzoom = def.minzoom;
@@ -751,6 +959,8 @@ export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalett
     water: layers.water.color,
     streets: layers.streets.color,
     streetCasing: darken(layers.streets.color, 0.2),
+    airports: layers.airports.color,
+    airportRunway: lighten(layers.airports.color, 0.12),
     rail: layers.rail.color,
     buildings: layers.buildings.color,
     buildingOutline: darken(layers.buildings.color, 0.25),
@@ -765,6 +975,7 @@ export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalett
       rock: 0.9,
       wetland: 0.85,
       builtUp: 0.55,
+      airports: 0.75,
     },
     enabled: {
       landForest: layers.landForest.enabled,
@@ -774,6 +985,7 @@ export function buildRenderPalette(input?: Partial<MapLayerStyle>): RenderPalett
       rock: layers.rock.enabled,
       wetland: layers.wetland.enabled,
       streets: layers.streets.enabled,
+      airports: layers.airports.enabled,
       rail: layers.rail.enabled,
       buildings: layers.buildings.enabled,
       labels: layers.streetNames.enabled,
@@ -796,6 +1008,8 @@ export interface RenderPalette {
   water: string;
   streets: string;
   streetCasing: string;
+  airports: string;
+  airportRunway: string;
   rail: string;
   buildings: string;
   buildingOutline: string;
@@ -810,6 +1024,7 @@ export interface RenderPalette {
     rock: number;
     wetland: number;
     builtUp: number;
+    airports: number;
   };
   enabled: {
     landForest: boolean;
@@ -819,6 +1034,7 @@ export interface RenderPalette {
     rock: boolean;
     wetland: boolean;
     streets: boolean;
+    airports: boolean;
     rail: boolean;
     buildings: boolean;
     labels: boolean;
@@ -837,6 +1053,10 @@ export function buildMapStyle(input?: Partial<MapLayerStyle>): Record<string, un
       [VECTOR_SOURCE]: {
         type: "vector",
         url: VECTOR_TILES_URL,
+      },
+      [PLACE_OVERZOOM_SOURCE]: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
       },
     },
     glyphs: GLYPHS_URL,

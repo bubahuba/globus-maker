@@ -6,6 +6,7 @@ export interface LatLng {
 export type MapLayerKey =
 	| 'water'
 	| 'streets'
+	| 'airports'
 	| 'streetNames'
 	| 'buildings'
 	| 'landForest'

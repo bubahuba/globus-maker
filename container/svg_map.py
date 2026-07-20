@@ -29,14 +29,19 @@ from tile_render import (
     USER_AGENT,
     VECTOR_TILE_MAX_ZOOM,
     WATER_NAME_CLASSES,
+    ZOOM_AEROWAYS_MIN,
     ZOOM_BUILDINGS_MIN,
     ZOOM_BUILT_UP_MIN,
     ZOOM_LABELS_PLACES_MIN,
     ZOOM_LABELS_STREETS_MIN,
     ZOOM_LABELS_WATER_MIN,
+    _aerodrome_label,
+    _aeroway_runway_width,
+    _aeroway_taxiway_width,
     _boundary_features,
     _boundary_line_width,
     _canvas_label_size,
+    _darken,
     _decode_feature_geometry,
     _feature_name,
     _geometry_lines,
@@ -45,6 +50,7 @@ from tile_render import (
     _is_street_feature,
     _label_anchor,
     _layer_features,
+    _lighten,
     _line_midpoint_and_angle,
     _resolve_tile_template,
     _street_casing_width,
@@ -105,6 +111,8 @@ class _SvgBuilder:
             "waterway": [],
             "builtup": [],
             "buildings": [],
+            "airports": [],
+            "airport_lines": [],
             "street_casing": [],
             "streets": [],
             "rail": [],
@@ -220,6 +228,8 @@ class _SvgBuilder:
             "waterway",
             "builtup",
             "buildings",
+            "airports",
+            "airport_lines",
             "street_casing",
             "streets",
             "rail",
@@ -384,6 +394,36 @@ def _append_tile_geometry(
         for line in _geometry_lines(geometry):
             svg.add_line("waterway", map_ring(line), water_color, width)
 
+    if enabled.get("airports", True) and zoom >= ZOOM_AEROWAYS_MIN:
+        airport_color = palette.get("airports", "#d4cfc6")
+        runway_color = palette.get("airportRunway", airport_color)
+        taxiway_color = _lighten(airport_color, 0.08)
+        airport_opacity = opacity.get("airports", 0.75)
+        runway_w = _aeroway_runway_width(zoom, render_scale) * scale
+        taxiway_w = _aeroway_taxiway_width(zoom, render_scale) * scale
+        for feature in _layer_features(decoded, "aeroway"):
+            props = feature.get("properties", {})
+            geometry = _decode_feature_geometry(feature)
+            if not geometry:
+                continue
+            geom_type = geometry["type"]
+            if geom_type in {"Polygon", "MultiPolygon"}:
+                for poly in _geometry_polygons(geometry):
+                    svg.add_polygon(
+                        "airports",
+                        [map_ring(ring) for ring in poly],
+                        airport_color,
+                        airport_opacity,
+                    )
+            elif geom_type in {"LineString", "MultiLineString"}:
+                cls = props.get("class")
+                if cls == "runway":
+                    for line in _geometry_lines(geometry):
+                        svg.add_line("airport_lines", map_ring(line), runway_color, runway_w)
+                elif cls == "taxiway":
+                    for line in _geometry_lines(geometry):
+                        svg.add_line("airport_lines", map_ring(line), taxiway_color, taxiway_w)
+
     if enabled.get("streets", True):
         street_color = palette.get("streets", "#ffffff")
         street_casing = palette.get("streetCasing", street_color)
@@ -476,7 +516,9 @@ def _append_labels(
     render_scale: int,
 ) -> None:
     enabled = render_palette.get("enabled", {})
-    if not enabled.get("labels", True):
+    labels_on = enabled.get("labels", True)
+    airports_on = enabled.get("airports", True) and label_zoom >= ZOOM_AEROWAYS_MIN
+    if not labels_on and not airports_on:
         return
     label_color = render_palette.get("labels", "#555555")
 
@@ -488,93 +530,119 @@ def _append_labels(
         offset_y = (tile_y - min_y) * tile_render_size
         return (offset_x + anchor[0]) * scale + ox, (offset_y + anchor[1]) * scale + oy
 
-    place_candidates: list[tuple[int, str, dict[str, Any], dict[str, Any], int, int]] = []
-    if label_zoom >= ZOOM_LABELS_PLACES_MIN:
-        for tile_x, tile_y, decoded in decoded_tiles:
-            for feature in _layer_features(decoded, "place"):
-                props = feature.get("properties", {})
-                place_class = props.get("class")
-                if place_class not in PRINT_PLACE_CLASSES:
-                    continue
-                name = _feature_name(props)
-                geometry = _decode_feature_geometry(feature)
-                if not name or not geometry:
-                    continue
-                priority = PLACE_LABEL_PRIORITY.get(place_class, 9)
-                place_candidates.append((priority, name, geometry, props, tile_x, tile_y))
+    if labels_on:
+        place_candidates: list[tuple[int, str, dict[str, Any], dict[str, Any], int, int]] = []
+        if label_zoom >= ZOOM_LABELS_PLACES_MIN:
+            for tile_x, tile_y, decoded in decoded_tiles:
+                for feature in _layer_features(decoded, "place"):
+                    props = feature.get("properties", {})
+                    place_class = props.get("class")
+                    if place_class not in PRINT_PLACE_CLASSES:
+                        continue
+                    name = _feature_name(props)
+                    geometry = _decode_feature_geometry(feature)
+                    if not name or not geometry:
+                        continue
+                    priority = PLACE_LABEL_PRIORITY.get(place_class, 9)
+                    place_candidates.append((priority, name, geometry, props, tile_x, tile_y))
 
-    place_candidates.sort(key=lambda item: (item[0], len(item[1])))
-    placed: set[str] = set()
-    for _, name, geometry, props, tile_x, tile_y in place_candidates:
-        if name in placed:
-            continue
-        anchor = to_svg_anchor(geometry, tile_x, tile_y)
-        if not anchor:
-            continue
-        font_size = _canvas_label_size(label_zoom, render_scale, "place", props.get("class")) * scale
-        before = len(svg._boxes)
-        svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
-        if len(svg._boxes) > before:
-            placed.add(name)
+        place_candidates.sort(key=lambda item: (item[0], len(item[1])))
+        placed: set[str] = set()
+        for _, name, geometry, props, tile_x, tile_y in place_candidates:
+            if name in placed:
+                continue
+            anchor = to_svg_anchor(geometry, tile_x, tile_y)
+            if not anchor:
+                continue
+            font_size = _canvas_label_size(label_zoom, render_scale, "place", props.get("class")) * scale
+            before = len(svg._boxes)
+            svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
+            if len(svg._boxes) > before:
+                placed.add(name)
 
-    if enabled.get("water", True) and label_zoom >= ZOOM_LABELS_WATER_MIN:
-        for tile_x, tile_y, decoded in decoded_tiles:
-            for feature in _layer_features(decoded, "water_name"):
-                props = feature.get("properties", {})
-                if props.get("class") not in WATER_NAME_CLASSES:
+        if enabled.get("water", True) and label_zoom >= ZOOM_LABELS_WATER_MIN:
+            for tile_x, tile_y, decoded in decoded_tiles:
+                for feature in _layer_features(decoded, "water_name"):
+                    props = feature.get("properties", {})
+                    if props.get("class") not in WATER_NAME_CLASSES:
+                        continue
+                    name = _feature_name(props)
+                    geometry = _decode_feature_geometry(feature)
+                    if not name or not geometry or len(name) > 24:
+                        continue
+                    anchor = to_svg_anchor(geometry, tile_x, tile_y)
+                    if not anchor:
+                        continue
+                    font_size = _canvas_label_size(label_zoom, render_scale, "water") * scale
+                    svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
+
+        if label_zoom >= ZOOM_LABELS_STREETS_MIN:
+            street_candidates: list[tuple[int, str, dict[str, Any], int, int]] = []
+            for tile_x, tile_y, decoded in decoded_tiles:
+                for feature in _layer_features(decoded, "transportation_name"):
+                    props = feature.get("properties", {})
+                    road_class = props.get("class")
+                    if road_class not in STREET_NAME_CLASSES:
+                        continue
+                    if props.get("subclass") == "junction":
+                        continue
+                    name = _feature_name(props)
+                    geometry = _decode_feature_geometry(feature)
+                    if not name or not geometry or len(name) > 28:
+                        continue
+                    priority = STREET_LABEL_PRIORITY.get(road_class, 8)
+                    street_candidates.append((priority, name, geometry, tile_x, tile_y))
+
+            street_candidates.sort(key=lambda item: (item[0], len(item[1])))
+            placed_streets: set[str] = set()
+            font_size = _canvas_label_size(label_zoom, render_scale, "street") * scale
+            for _, name, geometry, tile_x, tile_y in street_candidates:
+                if name in placed_streets:
                     continue
-                name = _feature_name(props)
+
+                def mapper(coords: list[list[float]], tx=tile_x, ty=tile_y) -> list[tuple[float, float]]:
+                    return _map_coords(
+                        coords, tx, ty, min_x, min_y, tile_render_size, scale, ox, oy
+                    )
+
+                placement = _line_midpoint_and_angle(geometry, mapper)
+                if not placement:
+                    continue
+                anchor, angle = placement
+                before = len(svg._boxes)
+                svg.add_label(
+                    anchor[0],
+                    anchor[1],
+                    name,
+                    label_color,
+                    max(6.0, font_size),
+                    angle_deg=angle,
+                )
+                if len(svg._boxes) > before:
+                    placed_streets.add(name)
+
+    if airports_on:
+        airport_label_color = _darken(render_palette.get("airports", "#d4cfc6"), 0.45)
+        font_size = max(
+            6.0, _canvas_label_size(label_zoom, render_scale, "street") * 0.95 * scale
+        )
+        placed_airports: set[str] = set()
+        for tile_x, tile_y, decoded in decoded_tiles:
+            for feature in _layer_features(decoded, "aerodrome_label"):
+                props = feature.get("properties", {})
+                if not props.get("iata") and props.get("class") != "international":
+                    continue
+                name = _aerodrome_label(props)
                 geometry = _decode_feature_geometry(feature)
-                if not name or not geometry or len(name) > 24:
+                if not name or not geometry or name in placed_airports:
                     continue
                 anchor = to_svg_anchor(geometry, tile_x, tile_y)
                 if not anchor:
                     continue
-                font_size = _canvas_label_size(label_zoom, render_scale, "water") * scale
-                svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
-
-    if label_zoom >= ZOOM_LABELS_STREETS_MIN:
-        street_candidates: list[tuple[int, str, dict[str, Any], int, int]] = []
-        for tile_x, tile_y, decoded in decoded_tiles:
-            for feature in _layer_features(decoded, "transportation_name"):
-                props = feature.get("properties", {})
-                road_class = props.get("class")
-                if road_class not in STREET_NAME_CLASSES:
-                    continue
-                name = _feature_name(props)
-                geometry = _decode_feature_geometry(feature)
-                if not name or not geometry or len(name) > 28:
-                    continue
-                priority = STREET_LABEL_PRIORITY.get(road_class, 8)
-                street_candidates.append((priority, name, geometry, tile_x, tile_y))
-
-        street_candidates.sort(key=lambda item: (item[0], len(item[1])))
-        placed_streets: set[str] = set()
-        font_size = _canvas_label_size(label_zoom, render_scale, "street") * scale
-        for _, name, geometry, tile_x, tile_y in street_candidates:
-            if name in placed_streets:
-                continue
-
-            def mapper(coords: list[list[float]], tx=tile_x, ty=tile_y) -> list[tuple[float, float]]:
-                return _map_coords(
-                    coords, tx, ty, min_x, min_y, tile_render_size, scale, ox, oy
-                )
-
-            placement = _line_midpoint_and_angle(geometry, mapper)
-            if not placement:
-                continue
-            anchor, angle = placement
-            before = len(svg._boxes)
-            svg.add_label(
-                anchor[0],
-                anchor[1],
-                name,
-                label_color,
-                max(6.0, font_size),
-                angle_deg=angle,
-            )
-            if len(svg._boxes) > before:
-                placed_streets.add(name)
+                before = len(svg._boxes)
+                svg.add_label(anchor[0], anchor[1], name, airport_label_color, font_size)
+                if len(svg._boxes) > before:
+                    placed_airports.add(name)
 
 
 def build_svg_from_payloads(

@@ -28,11 +28,15 @@ assert(byId["built-up"]?.minzoom === OSM_ZOOM.builtUpMin, "built-up minzoom");
 assert(byId["built-up"]?.maxzoom == null, "built-up has no maxzoom (always on while buildings enabled)");
 assert(byId["built-up"]?.group === "buildings", "built-up tied to buildings toggle");
 assert(byId.buildings?.minzoom === OSM_ZOOM.buildingsMin, "buildings minzoom");
-assert(byId["labels-places"]?.minzoom === OSM_ZOOM.labelsPlacesMin, "places minzoom");
+assert(byId["labels-place-city"]?.minzoom === OSM_ZOOM.labelsPlacesMin, "city labels minzoom");
+assert(byId["labels-place-suburb"]?.minzoom === OSM_ZOOM.labelsSuburbsMin, "suburb labels minzoom");
+assert(byId["labels-place-suburb-overzoom"]?.minzoom === 10, "suburb overzoom at ML z10");
+assert(byId["labels-place-suburb-overzoom"]?.maxzoom === 11, "suburb overzoom only below z11 tiles");
 assert(byId["labels-water"]?.minzoom === OSM_ZOOM.labelsWaterMin, "water labels minzoom");
 assert(byId["labels-waterway"]?.minzoom === OSM_ZOOM.labelsWaterwayMin, "waterway labels minzoom");
 assert(byId["labels-park"]?.minzoom === OSM_ZOOM.labelsParkMin, "park labels minzoom");
 assert(byId["labels-streets"]?.minzoom === OSM_ZOOM.labelsStreetsMin, "street labels minzoom");
+assert(byId["labels-highway-refs"]?.minzoom === OSM_ZOOM.labelsHighwayRefsMin, "highway refs minzoom");
 
 const groupedKeys = MAP_LAYER_GROUPS.flatMap((g) => g.keys);
 assert(
@@ -42,9 +46,19 @@ assert(
 
 assert(layerZoomHint("buildings")?.includes("z12") === true, "buildings zoom hint");
 assert(layerZoomHint("buildings")?.includes("z10") === true, "built-up zoom hint");
-assert(layerZoomHint("streetNames")?.includes("z12") === true, "street labels zoom hint");
+assert(layerZoomHint("streetNames")?.includes("z11") === true, "suburb labels zoom hint");
+assert(layerZoomHint("airports")?.includes("z10") === true, "airports zoom hint");
 assert(layerZoomHint("water")?.includes("z9") === true, "water zoom hint");
 assert(layerZoomHint("landForest") == null, "land has no special base-fill hint");
+
+const transportGroup = MAP_LAYER_GROUPS.find((g) => g.id === "transport");
+assert(
+  JSON.stringify(transportGroup?.keys) === JSON.stringify(["streets", "airports", "rail"]),
+  "airports under streets in transport UI group",
+);
+assert(byId["aeroway-fill"]?.group === "airports", "aeroway-fill tied to airports toggle");
+assert(byId["aeroway-runway"]?.minzoom === OSM_ZOOM.aerowaysMin, "runway minzoom");
+assert(byId["labels-aerodrome"]?.group === "airports", "aerodrome labels under airports");
 
 const style = buildMapStyle();
 const layers = style.layers as Array<Record<string, unknown>>;
@@ -55,7 +69,18 @@ const styleIds = new Set(layers.map((l) => l.id as string));
 
 assert(builtUp?.minzoom === 10 && builtUp?.maxzoom == null, "buildMapStyle emits built-up from z10");
 assert(buildings?.minzoom === 12, "buildMapStyle emits buildings from z12");
-assert(streets?.minzoom === 12, "buildMapStyle emits street labels from z12");
+assert(streets?.minzoom === 10, "buildMapStyle emits street labels from ML z10 (Leaflet UI z11)");
+assert(
+  JSON.stringify(streets?.filter).includes("junction"),
+  "street labels exclude motorway junctions",
+);
+assert(styleIds.has("labels-place-suburb"), "suburb place labels in style");
+assert(styleIds.has("labels-place-suburb-overzoom"), "suburb overzoom labels in style");
+assert(styleIds.has("labels-highway-refs"), "highway ref labels in style");
+assert(
+  Boolean((style.sources as Record<string, unknown>)["place-overzoom"]),
+  "place-overzoom geojson source",
+);
 assert(styleIds.has("water"), "water in default style");
 assert(styleIds.has("landcover-grass"), "land in default style");
 
@@ -193,8 +218,25 @@ const disabledRail = buildMapStyle({
 });
 assert(layerVisibility(disabledRail, "rail") === "none", "rail hidden when disabled");
 
+const disabledAirports = buildMapStyle({
+  airports: { enabled: false, color: "#d4cfc6" },
+});
+assert(layerVisibility(disabledAirports, "aeroway-fill") === "none", "aeroway fill hidden when airports off");
+assert(layerVisibility(disabledAirports, "aeroway-runway") === "none", "runway hidden when airports off");
+assert(layerVisibility(disabledAirports, "labels-aerodrome") === "none", "aerodrome labels hidden when airports off");
+
 const defaultIds = new Set(layers.map((l) => l.id as string));
-for (const id of ["landcover-snow", "landcover-sand", "landcover-rock", "landcover-wetland", "rail"]) {
+for (const id of [
+  "landcover-snow",
+  "landcover-sand",
+  "landcover-rock",
+  "landcover-wetland",
+  "rail",
+  "aeroway-fill",
+  "aeroway-runway",
+  "aeroway-taxiway",
+  "labels-aerodrome",
+]) {
   assert(defaultIds.has(id), `default style includes ${id}`);
 }
 
@@ -202,7 +244,9 @@ const palette = buildRenderPalette();
 assert(typeof palette.builtUp === "string", "palette includes builtUp");
 assert(palette.snow === "#f0f4f8", "palette snow color");
 assert(palette.rail === "#6a6a6a", "palette rail color");
+assert(palette.airports === "#d4cfc6", "palette airports color");
 assert(palette.enabled.snow === true && palette.enabled.rail === true, "new layers enabled by default");
+assert(palette.enabled.airports === true, "airports enabled by default");
 assert(palette.opacity.builtUp === 0.55, "palette builtUp opacity");
 assert(palette.background === "#e8eddb", "default stripe base fill is land");
 assert(palette.land === "#e8eddb", "default land color");

@@ -5,6 +5,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png?url';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png?url';
 import { buildMapStyle, type MapLayerStyle } from '@shared/map-style';
 import { SELECTION_ZOOM, WORLD_VIEW, WORLD_ZOOM } from './constants';
+import { attachPlaceOverzoom } from './place-overzoom';
 
 export interface MapSelection {
 	center: { lat: number; lng: number };
@@ -50,6 +51,10 @@ export function initMap(
 		style: buildMapStyle(mapLayers) as import('maplibre-gl').StyleSpecification
 	}).addTo(map) as MaplibreGlLayer;
 
+	const glMap = baseLayer.getMaplibreMap();
+	const detachOverzoom = attachPlaceOverzoom(glMap);
+	map.on('remove', () => detachOverzoom());
+
 	L.control
 		.attribution({
 			prefix: false
@@ -66,9 +71,10 @@ export function updateMapStyle(baseLayer: MaplibreGlLayer, mapLayers: MapLayerSt
 	const map = baseLayer.getMaplibreMap();
 	const style = buildMapStyle(mapLayers) as import('maplibre-gl').StyleSpecification;
 	const apply = () => {
-		// Diff updates visibility/paint; buildMapStyle always emits explicit
-		// layout.visibility so off→on toggles are not stuck at "none".
-		map.setStyle(style, { diff: true });
+		// Full replace (not diff): layer id/filter structure changes (e.g. split
+		// place labels) are otherwise left half-applied with stale symbol layers.
+		// buildMapStyle always emits explicit layout.visibility for toggles.
+		map.setStyle(style, { diff: false });
 	};
 	if (map.isStyleLoaded()) apply();
 	else map.once('load', apply);

@@ -16,6 +16,8 @@
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.2",
     "@types/leaflet": "^1.9.17",
+    "@types/mapbox__vector-tile": "^1.3.4",
+    "@types/pbf": "^3.0.5",
     "svelte": "^5.56.1",
     "svelte-check": "^4.6.0",
     "tailwindcss": "^4.3.2",
@@ -23,10 +25,12 @@
     "vite": "^8.0.16"
   },
   "dependencies": {
+    "@mapbox/vector-tile": "^3.0.0",
     "@maplibre/maplibre-gl-leaflet": "^0.1.3",
     "@types/three": "^0.185.1",
     "leaflet": "^1.9.4",
     "maplibre-gl": "^5.24.0",
+    "pbf": "^5.1.2",
     "three": "^0.185.1"
   }
 }
