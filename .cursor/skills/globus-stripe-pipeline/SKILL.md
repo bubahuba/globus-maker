@@ -29,11 +29,11 @@ description: Understand and modify the Globus Maker job pipeline from map select
 
 ## Processor steps
 
-1. **fetching_tiles** — render vector tiles with palette
-2. **stitching** — merge into square `input.jpg`
-3. **prewarp** — copy → `input-distorted.jpg` (`spherical_prewarp`)
-4. **projecting** — `slize.pl` on `input-distorted.jpg`
-5. **packaging** — zip `input.jpg` + `input-distorted.jpg` + stripes
+1. **fetching_tiles** — MVT → square `input.svg` (`svg_map.py`)
+2. **stitching** — upload stitched SVG (crop/pad already in SVG build)
+3. **prewarp** — geometric BarrelInverse → `input-distorted.svg` (`svg_warp.py`)
+4. **projecting** — stereographic→TM → `out-*.svg`; DePolar JPEG preview for globe
+5. **packaging** — zip SVGs (`input.svg`, `input-distorted.svg`, stripes)
 6. API stores zip in R2, marks **complete**
 
 ## Reference test values
@@ -51,5 +51,5 @@ Run `npm test` after tile-math changes.
 | Input validation | `validateJobInput()` in tile-math, API handlers |
 | Zoom/tile limits | `BE/src/osm/tile-math.ts` |
 | Map appearance | `shared/map-style.ts`, `container/tile_render.py` |
-| Stripe geometry | `container/slize.pl`, `process.py` |
+| Stripe geometry | `container/svg_warp.py`, `process.py` |
 | Job storage | `BE/src/jobs/store.ts`, `artifacts.ts` |

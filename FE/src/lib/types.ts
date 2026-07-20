@@ -12,11 +12,16 @@ export interface MapLayerSettings {
 
 export type MapLayerStyle = Record<MapLayerKey, MapLayerSettings>;
 
+/** Stripe artifact format produced by the processor. */
+export type OutputFormat = 'jpg' | 'svg';
+
 export interface JobRequest {
 	center: LatLng;
 	sideMeters: number;
 	stripes: number;
 	diameterCm: number;
+	/** Stripe output format — JPEG (slize.pl) or SVG (geometric warp). */
+	outputFormat?: OutputFormat;
 	/** Short place label for download naming (e.g. city from geocode). */
 	placeName?: string;
 	mapLayers?: MapLayerStyle;
@@ -63,7 +68,7 @@ export interface JobResponse {
 	queuePosition?: number;
 	/** Total jobs in the processor line (waiting + running). */
 	queueLength?: number;
-	/** Previewable JPEG filenames ready for GET /api/jobs/:id/files/:name. */
+	/** Previewable filenames ready for GET /api/jobs/:id/files/:name (SVG + preview JPEG). */
 	files?: string[];
 	/** False after download or TTL purge — zip/previews removed from the server. */
 	artifactsAvailable?: boolean;
@@ -77,6 +82,7 @@ export interface JobResponse {
 	sideMeters?: number;
 	stripes?: number;
 	diameterCm?: number;
+	outputFormat?: OutputFormat;
 }
 
 export interface CreateJobResponse {

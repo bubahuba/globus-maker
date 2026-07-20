@@ -1,10 +1,9 @@
-"""Center-based spherical pre-warp before stereographic stripe projection.
+"""Raster helpers for sphere preview and optional JPEG BarrelInverse.
 
-Compresses the map center (BarrelInverse) so features near the pole appear
-smaller before slize.pl stereographic → transverse-mercator remapping.
-
-Also builds the sphere-preview texture via ImageMagick DePolar on the
-prewarped square map (centre = north pole).
+Primary paths use svg_warp / slize.pl for stripes. This module still provides:
+- ImageMagick BarrelInverse for JPEG prewarp
+- SVG→JPEG rasterization
+- Sphere preview: DePolar unwrap of the prewarped map (equirect for WebGL)
 """
 
 from __future__ import annotations
@@ -15,9 +14,8 @@ import tempfile
 from pathlib import Path
 
 # Center-compress for stereographic compensation.
-# ImageMagick BarrelInverse: Rsrc = r*(A*r^3 + B*r^2 + C*r + D);
+# ImageMagick BarrelInverse samples: Rsrc = Rd / (A*Rd^3 + B*Rd^2 + C*Rd + D);
 # D ≈ 1-C keeps the rim radius approximately fixed.
-# Positive C (<1) shrinks the center; negative C expands it.
 BARREL_INVERSE_ARGS = "0.0 0.0 0.35 0.65"
 JPEG_QUALITY = 98
 
@@ -30,6 +28,47 @@ def _magick_bin() -> str:
         if shutil.which(name):
             return name
     raise FileNotFoundError("ImageMagick not found (magick/convert)")
+
+
+def rasterize_svg(
+    svg_path: Path,
+    dest: Path,
+    *,
+    max_edge: int = SPHERE_PREVIEW_MAX_EDGE,
+    quality: int = 90,
+    background_color: str = "#e8eddb",
+) -> Path:
+    """Rasterize an SVG to JPEG via ImageMagick (needs SVG delegate / rsvg)."""
+    svg_path = Path(svg_path)
+    dest = Path(dest)
+    if not svg_path.is_file():
+        raise FileNotFoundError(f"Missing SVG: {svg_path}")
+
+    magick = _magick_bin()
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, dir=dest.parent) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        cmd = [
+            magick,
+            "-background",
+            background_color,
+            str(svg_path),
+            "-resize",
+            f"{max_edge}x{max_edge}>",
+            "-quality",
+            str(quality),
+            str(tmp_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not tmp_path.is_file() or tmp_path.stat().st_size <= 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+            raise RuntimeError(f"ImageMagick SVG rasterize failed: {detail}")
+        tmp_path.replace(dest)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+    return dest
 
 
 def spherical_prewarp(
@@ -91,6 +130,81 @@ def _identify_size(image_path: Path) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
+def build_stripe_sphere_preview(
+    stripe_paths: list[Path],
+    dest: Path,
+    *,
+    max_edge: int = SPHERE_PREVIEW_MAX_EDGE,
+    quality: int = 85,
+    background_color: str = "#e8eddb",
+) -> Path:
+    """Build an equirectangular globe texture from the N stripe gores.
+
+    Stripes are laid out left→right (``out-00`` … ``out-(n-1)``) so the WebGL
+    sphere shows exactly ``len(stripe_paths)`` longitudinal gores — not a
+    DePolar unwrap of the square map.
+    """
+    paths = [Path(p) for p in stripe_paths]
+    if not paths:
+        raise ValueError("Need at least one stripe for sphere preview")
+    for path in paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing stripe for sphere preview: {path}")
+
+    dest = Path(dest)
+    n = len(paths)
+    # Even width, exact 2:1, columns divide cleanly across gores.
+    out_w = max_edge if max_edge % 2 == 0 else max_edge - 1
+    # Prefer width divisible by stripe count for sharp seams.
+    col_w = max(1, out_w // n)
+    out_w = col_w * n
+    if out_w % 2:
+        col_w += 1
+        out_w = col_w * n
+    out_h = max(1, out_w // 2)
+
+    magick = _magick_bin()
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, dir=dest.parent) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        # Rasterize each gore to the same column size, then +append.
+        cmd: list[str] = [magick, "-background", background_color]
+        for path in paths:
+            cmd.extend(
+                [
+                    "(",
+                    str(path),
+                    "-background",
+                    background_color,
+                    "-resize",
+                    f"{col_w}x{out_h}!",
+                    ")",
+                ]
+            )
+        cmd.extend(
+            [
+                "+append",
+                "-quality",
+                str(quality),
+                str(tmp_path),
+            ]
+        )
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not tmp_path.is_file() or tmp_path.stat().st_size <= 0:
+            detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+            raise RuntimeError(f"Stripe sphere preview failed: {detail}")
+        tmp_path.replace(dest)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+    if not dest.is_file() or dest.stat().st_size <= 0:
+        raise RuntimeError("Stripe sphere preview produced an empty file")
+    return dest
+
+
 def build_depolar_sphere_preview(
     source: Path,
     dest: Path,
@@ -99,12 +213,7 @@ def build_depolar_sphere_preview(
     quality: int = 85,
     background_color: str = "#e8eddb",
 ) -> Path:
-    """Unwrap a centre-north square map with DePolar for sphere equirect UVs.
-
-    Uses ``Rmax=-1`` (radius to the furthest corner): top = centre / north pole,
-    bottom = scalloped corners with mid-side gaps filled via Background VP.
-    See https://usage.imagemagick.org/distorts/#depolar
-    """
+    """Legacy DePolar unwrap (kept for tests). Prefer ``build_stripe_sphere_preview``."""
     source = Path(source)
     dest = Path(dest)
     if not source.is_file():

@@ -16,6 +16,7 @@
 		JobResponse,
 		JobStatus,
 		LatLng,
+		OutputFormat,
 		StepUnit
 	} from '@lib/types';
 	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
@@ -45,6 +46,7 @@
 	let sideMeters = $state(2500);
 	let stripes = $state(12);
 	let diameterCm = $state(25);
+	let outputFormat = $state<OutputFormat>('jpg');
 	let mapLayers = $state(loadMapLayers());
 	let downloadFilename = $state<string | null>(null);
 
@@ -106,6 +108,7 @@
 
 		if (job.stripeCount != null) stripes = job.stripeCount;
 		if (job.diameterCm != null) diameterCm = job.diameterCm;
+		if (job.outputFormat === 'jpg' || job.outputFormat === 'svg') outputFormat = job.outputFormat;
 		if (job.sideMeters != null) sideMeters = job.sideMeters;
 		if (job.center) center = job.center;
 		if (job.placeName) placeName = job.placeName;
@@ -235,6 +238,7 @@
 			sideMeters,
 			stripes,
 			diameterCm,
+			outputFormat,
 			...(placeName ? { placeName } : {}),
 			mapLayers
 		};
@@ -437,6 +441,40 @@
 					/>
 				</label>
 
+				<fieldset class="mb-4 space-y-2">
+					<legend class="text-sm text-stone-600">Output format</legend>
+					<div class="grid grid-cols-2 gap-2">
+						<label class="cursor-pointer">
+							<input
+								type="radio"
+								name="outputFormat"
+								value="jpg"
+								bind:group={outputFormat}
+								class="peer sr-only"
+							/>
+							<span
+								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+							>
+								JPEG
+							</span>
+						</label>
+						<label class="cursor-pointer">
+							<input
+								type="radio"
+								name="outputFormat"
+								value="svg"
+								bind:group={outputFormat}
+								class="peer sr-only"
+							/>
+							<span
+								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+							>
+								SVG
+							</span>
+						</label>
+					</div>
+				</fieldset>
+
 				<button
 					type="button"
 					onclick={generateStripes}
@@ -493,6 +531,7 @@
 			status={jobStatus}
 			revision={jobUpdatedAt}
 			{artifactsAvailable}
+			{outputFormat}
 			visible={true}
 		/>
 	{/if}

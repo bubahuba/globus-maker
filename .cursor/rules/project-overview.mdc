@@ -35,4 +35,5 @@ Individual services: `dev:processor`, `dev:api`, `dev:fe`. Skip processor: `npm 
 - Map layer types/logic live in `shared/map-style.ts` — don't duplicate
 - Tile math lives in `BE/src/osm/tile-math.ts`; run `npm test` after changes
 - Stripe height: `diameterCm × 160` px; width formula in `stripeWidthPx()`
+- Job outputs are distorted **SVG** (zip + previews); globe preview may use a JPEG DePolar raster
 - Job statuses: `queued` → `fetching_tiles` → `stitching` → `projecting` → `packaging` → `complete` | `failed`

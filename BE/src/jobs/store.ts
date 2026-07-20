@@ -36,13 +36,16 @@ export async function getJob(
 }
 
 function sortJobFiles(files: Iterable<string>): string[] {
+  const rank = (name: string): number => {
+    const lower = name.toLowerCase();
+    if (lower === "input.svg" || lower === "input.jpg") return 0;
+    if (lower === "input-distorted.svg" || lower === "input-distorted.jpg") return 1;
+    if (lower === "input-distorted-preview.jpg") return 2;
+    return 3;
+  };
   return [...files].sort((a, b) => {
-    if (a === "input.jpg") return -1;
-    if (b === "input.jpg") return 1;
-    if (a === "input-distorted.jpg") return -1;
-    if (b === "input-distorted.jpg") return 1;
-    if (a === "input-distorted-preview.jpg") return -1;
-    if (b === "input-distorted-preview.jpg") return 1;
+    const diff = rank(a) - rank(b);
+    if (diff !== 0) return diff;
     return a.localeCompare(b, undefined, { numeric: true });
   });
 }
@@ -99,10 +102,18 @@ export function isTerminalStatus(status: JobStatus): boolean {
   return status === "complete" || status === "failed";
 }
 
-const JOB_FILE_RE = /^(input|input-distorted|input-distorted-preview|out-\d+)\.jpe?g$/i;
+const JOB_FILE_RE =
+  /^(?:(?:input|input-distorted)\.(?:jpg|jpeg|svg)|input-distorted-preview\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
 
 export function isAllowedJobFilename(name: string): boolean {
   return JOB_FILE_RE.test(name);
+}
+
+export function contentTypeForJobFile(name: string): string {
+  if (/\.svg$/i.test(name)) return "image/svg+xml";
+  if (/\.jpe?g$/i.test(name)) return "image/jpeg";
+  if (/\.png$/i.test(name)) return "image/png";
+  return "application/octet-stream";
 }
 
 export async function addJobFile(

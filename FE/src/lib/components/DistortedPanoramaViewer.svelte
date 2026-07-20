@@ -17,8 +17,8 @@
 	let container: HTMLDivElement | undefined = $state();
 	let statusMessage = $state('Loading sphere preview…');
 
-	/** Include cache-bust query so a replaced preview reloads. */
-	const loadKey = $derived(src);
+	/** Path only — ignore ?v= cache-bust so stripe uploads don't remount the globe. */
+	const loadKey = $derived(src.split('?')[0] || src);
 
 	let loadedKey = '';
 	let renderer: THREE.WebGLRenderer | null = null;

@@ -1,5 +1,5 @@
 ---
-description: Python processor container and image pipeline
+description: Python processor container and SVG stripe pipeline
 globs: container/**/*
 alwaysApply: false
 ---
@@ -16,11 +16,13 @@ While waiting, callbacks report `{ status: "queued", queuePosition, queueLength 
 
 ## Pipeline (`process.py`)
 
-1. Render vector tiles → `tile_render.py`
-2. Stitch tiles → `stitch.py` → `input.jpg` (undistorted stitch)
-3. Spherical prewarp copy → `input-distorted.jpg` (`distort.py`)
-4. Run `slize.pl` on `input-distorted.jpg` → `out-*.jpg` stripes
-5. Zip `input.jpg` + `input-distorted.jpg` + stripes → return to API
+1. Fetch MVT tiles → build square SVG map (`svg_map.py`) → `input.svg`
+2. Geometric BarrelInverse prewarp (`svg_warp.py`) → `input-distorted.svg`
+3. Stereographic → TM stripe projection → `out-*.svg`
+4. Montage stripe gores side-by-side → `input-distorted-preview.jpg` (globe UI; N columns = stripe count)
+5. Zip `input.svg` + `input-distorted.svg` + stripe SVGs → return to API
+
+Legacy bitmap helpers (`tile_render.py` Pillow path, `stitch.py`, `slize.pl`, `distort.spherical_prewarp`) remain for tests/fallback but are not used by `process_job`.
 
 ## Progress callbacks
 
@@ -35,8 +37,8 @@ docker compose up --build processor
 curl http://localhost:8080/health
 ```
 
-## Tile rendering (`tile_render.py`)
+## Tile rendering (`svg_map.py` / `tile_render.py`)
 
-Fetches OpenFreeMap vector tiles (max zoom **14**). When `manifest.zoom` is higher, tiles are **overzoomed** — parent z14 tiles are rendered, cropped, and upscaled (same as MapLibre preview).
+Fetches OpenFreeMap vector tiles (max zoom **14**). When `manifest.zoom` is higher, tiles are **overzoomed** — parent z14 tiles are used, then cropped/scaled into the SVG viewBox (same as MapLibre preview).
 
 Do not fetch vector tiles above maxzoom; they return empty and produce solid terrain-color output.

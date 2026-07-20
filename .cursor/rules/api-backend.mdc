@@ -22,8 +22,8 @@ alwaysApply: false
 | `PATCH /api/jobs/:id/progress` | Processor callback |
 | `DELETE /api/jobs/:id` | Cancel queued/running job |
 | `POST /api/jobs/:id/cancel` | Cancel (beacon-friendly) |
-| `PUT /api/jobs/:id/files/:name` | Processor uploads preview JPEG |
-| `GET /api/jobs/:id/files/:name` | Serve preview JPEG |
+| `PUT /api/jobs/:id/files/:name` | Processor uploads preview SVG/JPEG |
+| `GET /api/jobs/:id/files/:name` | Serve preview SVG/JPEG |
 | `GET /api/jobs/:id/download` | Download zip |
 | `GET /api/geocode?q=` | Nominatim proxy |
 

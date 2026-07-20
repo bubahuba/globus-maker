@@ -209,6 +209,7 @@ export function validateJobInput(input: {
   sideMeters: number;
   stripes: number;
   diameterCm: number;
+  outputFormat?: string;
 }): string | null {
   if (!Number.isFinite(input.center.lat) || input.center.lat < -85 || input.center.lat > 85) {
     return "Invalid latitude";
@@ -224,6 +225,13 @@ export function validateJobInput(input: {
   }
   if (!Number.isFinite(input.diameterCm) || input.diameterCm < 10 || input.diameterCm > 60) {
     return "diameterCm must be between 10 and 60";
+  }
+  if (
+    input.outputFormat != null &&
+    input.outputFormat !== "jpg" &&
+    input.outputFormat !== "svg"
+  ) {
+    return "outputFormat must be jpg or svg";
   }
   try {
     buildTileManifest(input.center, input.sideMeters, { diameterCm: input.diameterCm });

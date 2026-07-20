@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { jobFileUrl } from '@lib/api/jobs';
 	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
-	import type { JobStatus } from '@lib/types';
+	import type { JobStatus, OutputFormat } from '@lib/types';
 
 	interface Props {
 		jobId: string | null;
@@ -12,6 +12,8 @@
 		revision?: string | null;
 		/** False after download/TTL — server deleted preview files. */
 		artifactsAvailable?: boolean;
+		/** Requested stripe format; inferred from filenames when absent. */
+		outputFormat?: OutputFormat | null;
 		visible: boolean;
 	}
 
@@ -22,47 +24,64 @@
 		status = null,
 		revision = null,
 		artifactsAvailable = true,
+		outputFormat = null,
 		visible
 	}: Props = $props();
 
-	const MAP_SLOTS = [
-		{ filename: 'input.jpg', label: 'Stitched map' },
-		{ filename: 'input-distorted.jpg', label: 'Prewarped map' }
-	] as const;
+	const effectiveFormat = $derived.by((): OutputFormat => {
+		if (outputFormat === 'jpg' || outputFormat === 'svg') return outputFormat;
+		const lower = files.map((f) => f.toLowerCase());
+		if (lower.some((f) => f === 'input.svg' || /^out-\d+\.svg$/.test(f))) return 'svg';
+		return 'jpg';
+	});
+
+	const mapSlots = $derived.by(() => {
+		if (effectiveFormat === 'jpg') {
+			return [
+				{ filename: 'input.jpg', label: 'Stitched map' },
+				{ filename: 'input-distorted.jpg', label: 'Prewarped map' }
+			] as const;
+		}
+		return [
+			{ filename: 'input.svg', label: 'Stitched map' },
+			{ filename: 'input-distorted.svg', label: 'Prewarped map' }
+		] as const;
+	});
 
 	const readyMaps = $derived.by(() => {
 		const set = new Set(files.map((f) => f.toLowerCase()));
-		return MAP_SLOTS.map((slot) => ({
+		return mapSlots.map((slot) => ({
 			...slot,
 			ready: set.has(slot.filename.toLowerCase())
 		}));
 	});
 
-	const distortedReady = $derived(
-		files.some((f) => f.toLowerCase() === 'input-distorted.jpg')
-	);
-
-	/**
-	 * DePolar unwrap of the prewarped map (≤6000px).
-	 * Built after stripes finish so it appears with the other outputs.
-	 */
-	const spherePreviewFile = $derived(
-		files.some((f) => f.toLowerCase() === 'input-distorted-preview.jpg')
-			? 'input-distorted-preview.jpg'
-			: null
-	);
-
-	/** slize.pl writes out-00.jpg … out-(n-1).jpg — UI shows highest index first. */
+	/** Processor writes out-00.{jpg|svg} … — UI shows highest index first. */
 	const readyStripes = $derived.by(() => {
+		const pattern =
+			effectiveFormat === 'jpg' ? /^out-(\d+)\.jpe?g$/i : /^out-(\d+)\.svg$/i;
 		return files
 			.map((filename) => {
-				const match = /^out-(\d+)\.jpg$/i.exec(filename);
+				const match = pattern.exec(filename);
 				if (!match) return null;
 				return { filename, index: Number(match[1]) };
 			})
 			.filter((item): item is { filename: string; index: number } => item != null)
 			.sort((a, b) => b.index - a.index);
 	});
+
+	const spherePreviewFile = $derived(
+		files.some((f) => f.toLowerCase() === 'input-distorted-preview.jpg')
+			? 'input-distorted-preview.jpg'
+			: null
+	);
+
+	const distortedReady = $derived(
+		files.some((f) => {
+			const n = f.toLowerCase();
+			return n === 'input-distorted.jpg' || n === 'input-distorted.svg';
+		})
+	);
 
 	const showPlaceholders = $derived(
 		status !== 'complete' && status !== 'packaging' && status !== 'failed'
@@ -91,6 +110,26 @@
 	const stripeColumns = $derived(Math.max(1, stripeSlots.length || Number(stripeCount) || 1));
 
 	const showPreviews = $derived(artifactsAvailable || files.length > 0);
+
+	const previewHelperText = $derived(
+		effectiveFormat === 'jpg'
+			? 'JPEG previews appear here as each file finishes processing.'
+			: 'Distorted SVG previews appear here as each file finishes processing.'
+	);
+
+	let sphereRevision = $state<string | null>(null);
+	let sphereRevisionJobId = $state<string | null>(null);
+
+	$effect(() => {
+		if (jobId !== sphereRevisionJobId) {
+			sphereRevisionJobId = jobId;
+			sphereRevision = null;
+		}
+		if (spherePreviewFile && sphereRevision == null && revision) {
+			sphereRevision = revision;
+		}
+	});
+
 </script>
 
 {#if visible && jobId}
@@ -105,7 +144,7 @@
 					Server copies were removed after download to free disk space. Your zip is on your
 					device.
 				{:else}
-					Preview images appear here as each file finishes processing.
+					{previewHelperText}
 				{/if}
 			</p>
 		</div>
@@ -133,28 +172,21 @@
 				{/each}
 			</div>
 
-			{#if jobId && spherePreviewFile}
+			{#if spherePreviewFile && jobId}
 				<div class="space-y-2">
 					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
 					<p class="text-sm text-stone-500">
-						Globe from an ImageMagick DePolar unwrap of the prewarped map (max 6000px).
-						Map centre is the north pole; scalloped south gaps use the land background.
+						Globe from an ImageMagick DePolar unwrap of the prewarped map. Map centre is the
+						north pole.
 					</p>
 					<DistortedPanoramaViewer
-						src={jobFileUrl(jobId, spherePreviewFile, revision ?? undefined)}
+						src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
 					/>
 				</div>
-			{:else if jobId && (distortedReady || readyStripes.length > 0)}
+			{:else if (distortedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 				<div class="space-y-2">
 					<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
-					<p class="text-sm text-stone-500">
-						{#if status === 'complete' || status === 'failed'}
-							Sphere preview was not available for this job. Rebuild the processor and run
-							again.
-						{:else}
-							Waiting for stripes to finish, then building the DePolar globe texture…
-						{/if}
-					</p>
+					<p class="text-sm text-stone-500">Waiting for DePolar texture…</p>
 				</div>
 			{/if}
 

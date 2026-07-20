@@ -14,6 +14,7 @@ import {
 import { buildMapStyle, buildRenderPalette, validateMapLayers } from "../../shared/map-style";
 import {
   addJobFile,
+  contentTypeForJobFile,
   createJobId,
   getJob,
   isAllowedJobFilename,
@@ -142,6 +143,7 @@ async function runJob(env: Env, job: JobRecord, origin: string): Promise<void> {
     stripes: job.request.stripes,
     diameterCm: job.request.diameterCm,
     stripeHeightPx: stripeH,
+    outputFormat: job.request.outputFormat === "svg" ? "svg" : "jpg",
     placeName: job.request.placeName,
     mapLayers,
     mapStyle: buildMapStyle(mapLayers),
@@ -222,6 +224,7 @@ app.post("/api/jobs", async (c) => {
   const stripeH = stripeHeightPx(body.diameterCm);
   const placeName =
     typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
+  const outputFormat = body.outputFormat === "svg" ? "svg" : "jpg";
   const job: JobRecord = {
     id: createJobId(),
     status: "queued",
@@ -231,7 +234,7 @@ app.post("/api/jobs", async (c) => {
     stripeWidthPx: stripeWidthPx(stripeH, body.stripes),
     createdAt: now,
     updatedAt: now,
-    request: { ...body, placeName },
+    request: { ...body, placeName, outputFormat },
   };
 
   await saveJob(c.env.ARTIFACTS, job);
@@ -288,6 +291,7 @@ app.get("/api/jobs/:id", async (c) => {
     sideMeters: job.request.sideMeters,
     stripes: job.request.stripes,
     diameterCm: job.request.diameterCm,
+    outputFormat: job.request.outputFormat === "svg" ? "svg" : "jpg",
   });
 });
 
@@ -309,7 +313,8 @@ app.put("/api/jobs/:id/files/:name", async (c) => {
     return c.json({ error: "Empty file body" }, 400);
   }
 
-  await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/files/${name}`, bytes, "image/jpeg");
+  const contentType = contentTypeForJobFile(name);
+  await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/files/${name}`, bytes, contentType);
   await addJobFile(c.env.ARTIFACTS, jobId, name);
   return c.json({ ok: true, file: name });
 });
@@ -328,7 +333,7 @@ app.get("/api/jobs/:id/files/:name", async (c) => {
   if (!bytes) return c.json({ error: "File not ready" }, 404);
 
   const headers = new Headers();
-  headers.set("Content-Type", "image/jpeg");
+  headers.set("Content-Type", contentTypeForJobFile(name));
   // Previews may be replaced after a partial upload; never serve stale bytes.
   headers.set("Cache-Control", "no-store");
   return new Response(bytes, { headers });

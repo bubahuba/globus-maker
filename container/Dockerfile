@@ -5,6 +5,7 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     hugin-tools \
     imagemagick \
+    librsvg2-bin \
     perl \
     libimage-exiftool-perl \
     libmath-round-perl \
@@ -14,12 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
-    # Large globes (up to ~60cm × supersample) need ~19k² px for BarrelInverse.
+    # Large globe rasterization needs headroom; allow SVG read for stripe montage.
     && sed -i \
       -e 's/name="memory" value="[^"]*"/name="memory" value="8GiB"/' \
       -e 's/name="map" value="[^"]*"/name="map" value="16GiB"/' \
       -e 's/name="area" value="[^"]*"/name="area" value="1GP"/' \
       -e 's/name="disk" value="[^"]*"/name="disk" value="16GiB"/' \
+      -e 's/rights="none" pattern="SVG"/rights="read|write" pattern="SVG"/' \
+      -e 's/rights="none" pattern="MSVG"/rights="read|write" pattern="MSVG"/' \
+      -e 's/rights="none" pattern="MVG"/rights="read|write" pattern="MVG"/' \
       /etc/ImageMagick-7/policy.xml
 
 WORKDIR /app
@@ -27,7 +31,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY slize.pl process.py stitch.py tile_render.py distort.py job_queue.py server.py ./
+COPY slize.pl process.py stitch.py tile_render.py distort.py svg_map.py svg_warp.py job_queue.py server.py ./
 RUN chmod +x /app/slize.pl
 
 ENV PORT=8080

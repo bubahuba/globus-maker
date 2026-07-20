@@ -38,4 +38,5 @@ Skills in `.cursor/skills/` (load when relevant):
 - Stripe height: `diameterCm × 160` px
 - Keep `BE/src/types.ts` and `FE/src/lib/types.ts` aligned
 - Map layers: single source in `shared/map-style.ts`
+- Job download/previews are distorted **SVG** (`input.svg`, `input-distorted.svg`, `out-*.svg`); globe preview may use a JPEG
 - Run `npm test` after `tile-math.ts` changes
