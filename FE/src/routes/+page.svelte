@@ -457,6 +457,7 @@
 						}}
 						ondownloaded={() => {
 							artifactsAvailable = false;
+							jobPaid = false;
 							jobFiles = [];
 							downloadFilename = null;
 						}}

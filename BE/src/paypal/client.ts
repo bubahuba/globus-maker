@@ -59,12 +59,34 @@ async function paypalFetch(
   return fetch(`${paypalApiBase(cfg.mode)}${path}`, { ...init, headers });
 }
 
+function formatDiameterCm(diameterCm: number): string {
+  const cm = Number.isFinite(diameterCm) ? Math.round(diameterCm * 10) / 10 : 0;
+  return Number.isInteger(cm) ? String(cm) : cm.toFixed(1);
+}
+
+/** Payment note / line-item text shown on PayPal (card + wallet). */
+export function paypalPaymentNote(filename: string, diameterCm: number): string {
+  const size = formatDiameterCm(diameterCm);
+  const name = filename.trim() || "globe-stripes.zip";
+  return `${name} · ${size} cm globe`;
+}
+
+export interface CreateOrderDetails {
+  jobId: string;
+  filename: string;
+  diameterCm: number;
+}
+
 export async function createGlobeDownloadOrder(
   env: Env,
-  jobId: string,
+  details: CreateOrderDetails,
 ): Promise<{ id: string }> {
   const cfg = resolvePaypalConfig(env);
   if (!cfg) throw new Error("PayPal is not configured");
+
+  const note = paypalPaymentNote(details.filename, details.diameterCm);
+  const itemName = details.filename.trim().slice(0, 127) || "Globe stripes zip";
+  const itemDescription = `Globe diameter ${formatDiameterCm(details.diameterCm)} cm`.slice(0, 127);
 
   const response = await paypalFetch(cfg, "/v2/checkout/orders", {
     method: "POST",
@@ -72,13 +94,32 @@ export async function createGlobeDownloadOrder(
       intent: "CAPTURE",
       purchase_units: [
         {
-          reference_id: jobId,
-          custom_id: jobId,
-          description: `Globus Maker globe stripes (${jobId})`,
+          reference_id: details.jobId,
+          custom_id: details.jobId,
+          description: note.slice(0, 127),
+          invoice_id: `${details.jobId}`.slice(0, 127),
           amount: {
             currency_code: cfg.currency,
             value: cfg.amount,
+            breakdown: {
+              item_total: {
+                currency_code: cfg.currency,
+                value: cfg.amount,
+              },
+            },
           },
+          items: [
+            {
+              name: itemName,
+              description: itemDescription,
+              quantity: "1",
+              category: "DIGITAL_GOODS",
+              unit_amount: {
+                currency_code: cfg.currency,
+                value: cfg.amount,
+              },
+            },
+          ],
         },
       ],
       application_context: {

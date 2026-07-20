@@ -15,6 +15,7 @@ from tile_render import (
     BOUNDARY_STATE_COLOR,
     BUILT_UP_CLASSES,
     EXTENT,
+    clip_polygons_to_tile_extent,
     LAND_FOREST_CLASSES,
     LAND_ROCK_CLASSES,
     LAND_SAND_CLASSES,
@@ -314,7 +315,7 @@ def _append_tile_geometry(
         geometry = _decode_feature_geometry(feature)
         if not geometry:
             continue
-        for poly in _geometry_polygons(geometry):
+        for poly in clip_polygons_to_tile_extent(_geometry_polygons(geometry)):
             rings = [map_ring(ring) for ring in poly]
             if cls in LAND_FOREST_CLASSES:
                 if not enabled.get("landForest", True):
@@ -357,7 +358,7 @@ def _append_tile_geometry(
             geometry = _decode_feature_geometry(feature)
             if not geometry:
                 continue
-            for poly in _geometry_polygons(geometry):
+            for poly in clip_polygons_to_tile_extent(_geometry_polygons(geometry)):
                 svg.add_polygon(
                     "park",
                     [map_ring(ring) for ring in poly],
@@ -415,6 +416,8 @@ def _append_tile_geometry(
 
     if enabled.get("buildings", True) and zoom >= ZOOM_BUILT_UP_MIN:
         built_up_color = palette.get("builtUp", palette.get("buildings", "#d9d5d0"))
+        # Clip to tile extent: MVT buffer duplicates landuse across neighbours;
+        # translucent fills then stack into visible grid seams.
         for feature in _layer_features(decoded, "landuse"):
             props = feature.get("properties", {})
             if props.get("class") not in BUILT_UP_CLASSES:
@@ -422,7 +425,7 @@ def _append_tile_geometry(
             geometry = _decode_feature_geometry(feature)
             if not geometry:
                 continue
-            for poly in _geometry_polygons(geometry):
+            for poly in clip_polygons_to_tile_extent(_geometry_polygons(geometry)):
                 svg.add_polygon(
                     "builtup",
                     [map_ring(ring) for ring in poly],

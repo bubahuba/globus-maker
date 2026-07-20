@@ -215,63 +215,65 @@
 	>
 		<div
 			{@attach dialogPanel}
-			class="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl ring-1 ring-stone-200 sm:p-6"
+			class="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-stone-200"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby={titleId}
 			aria-describedby={descId}
 		>
-			<h2 id={titleId} class="text-lg font-semibold text-stone-900">
-				Download globe stripes
-			</h2>
-			<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
-				Globe stripe generation takes more compute than a flat map. Pay
-				{amountLabel} with PayPal to unlock the full zip (map + pole caps + stripes).
-				{#if filename}
-					<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
-				{/if}
-				{#if config?.mode === 'sandbox'}
-					<span class="mt-1 block text-xs text-amber-800">Sandbox mode — no real charge.</span>
-				{/if}
-			</p>
+			<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
+				<h2 id={titleId} class="text-lg font-semibold text-stone-900">
+					Download globe stripes
+				</h2>
+				<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
+					Globe stripe generation takes more compute than a flat map. Pay
+					{amountLabel} with PayPal to unlock the full zip (map + pole caps + stripes).
+					{#if filename}
+						<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
+					{/if}
+					{#if config?.mode === 'sandbox'}
+						<span class="mt-1 block text-xs text-amber-800">Sandbox mode — no real charge.</span>
+					{/if}
+				</p>
 
-			<div class="mt-5 min-h-[48px]">
-				{#if loadError}
-					<p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-						{loadError}
-					</p>
-				{:else if busy === 'sdk'}
-					<p class="text-sm text-stone-500">Loading PayPal…</p>
+				<div class="mt-5 min-h-[48px]">
+					{#if loadError}
+						<p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+							{loadError}
+						</p>
+					{:else if busy === 'sdk'}
+						<p class="text-sm text-stone-500">Loading PayPal…</p>
+					{/if}
+					<div {@attach paypalButtonsHost} class="w-full" data-autofocus></div>
+					{#if busy === 'pay' || busy === 'paid'}
+						<p class="mt-2 text-sm text-stone-600">
+							{busy === 'paid' ? `Downloading ${zipLabel}…` : 'Confirming payment…'}
+						</p>
+					{/if}
+				</div>
+
+				{#if payError}
+					<p class="mt-3 text-sm text-red-700">{payError}</p>
 				{/if}
-				<div {@attach paypalButtonsHost} class="w-full" data-autofocus></div>
-				{#if busy === 'pay' || busy === 'paid'}
-					<p class="mt-2 text-sm text-stone-600">
-						{busy === 'paid' ? `Downloading ${zipLabel}…` : 'Confirming payment…'}
-					</p>
-				{/if}
+
+				<button
+					type="button"
+					onclick={confirmFreeDownload}
+					disabled={busy != null}
+					class="mt-4 w-full rounded-lg px-3 py-2 text-sm text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+				>
+					{busy === 'free' ? 'Downloading…' : 'Download map SVG without paying'}
+				</button>
+
+				<button
+					type="button"
+					onclick={close}
+					disabled={busy === 'pay' || busy === 'paid'}
+					class="mt-2 w-full rounded-lg px-3 py-1.5 text-xs text-stone-500 hover:text-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-50"
+				>
+					Cancel
+				</button>
 			</div>
-
-			{#if payError}
-				<p class="mt-3 text-sm text-red-700">{payError}</p>
-			{/if}
-
-			<button
-				type="button"
-				onclick={confirmFreeDownload}
-				disabled={busy != null}
-				class="mt-4 w-full rounded-lg px-3 py-2 text-sm text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
-			>
-				{busy === 'free' ? 'Downloading…' : 'Download map SVG without paying'}
-			</button>
-
-			<button
-				type="button"
-				onclick={close}
-				disabled={busy === 'pay' || busy === 'paid'}
-				class="mt-2 w-full rounded-lg px-3 py-1.5 text-xs text-stone-500 hover:text-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-50"
-			>
-				Cancel
-			</button>
 		</div>
 	</div>
 {/if}

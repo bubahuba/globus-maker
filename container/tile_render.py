@@ -374,6 +374,87 @@ def _geometry_polygons(geometry: dict[str, Any]) -> list[list[list[float]]]:
     return []
 
 
+def _clip_ring_to_rect(
+    ring: list[list[float]],
+    min_x: float,
+    min_y: float,
+    max_x: float,
+    max_y: float,
+) -> list[list[float]]:
+    """Sutherland–Hodgman clip of a ring to an axis-aligned rectangle."""
+    if len(ring) < 3:
+        return []
+
+    def _inside(p: list[float], edge: str) -> bool:
+        x, y = p[0], p[1]
+        if edge == "left":
+            return x >= min_x
+        if edge == "right":
+            return x <= max_x
+        if edge == "bottom":
+            return y >= min_y
+        return y <= max_y
+
+    def _intersect(p1: list[float], p2: list[float], edge: str) -> list[float]:
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        if edge in {"left", "right"}:
+            x = min_x if edge == "left" else max_x
+            if x2 == x1:
+                return [x, y1]
+            t = (x - x1) / (x2 - x1)
+            return [x, y1 + t * (y2 - y1)]
+        y = min_y if edge == "bottom" else max_y
+        if y2 == y1:
+            return [x1, y]
+        t = (y - y1) / (y2 - y1)
+        return [x1 + t * (x2 - x1), y]
+
+    output = [list(p) for p in ring]
+    if len(output) >= 2 and output[0] == output[-1]:
+        output = output[:-1]
+
+    for edge in ("left", "right", "bottom", "top"):
+        if not output:
+            return []
+        inp = output
+        output = []
+        s = inp[-1]
+        for e in inp:
+            e_in = _inside(e, edge)
+            s_in = _inside(s, edge)
+            if e_in:
+                if not s_in:
+                    output.append(_intersect(s, e, edge))
+                output.append(e)
+            elif s_in:
+                output.append(_intersect(s, e, edge))
+            s = e
+
+    if len(output) < 3:
+        return []
+    if output[0] != output[-1]:
+        output.append(output[0][:])
+    return output
+
+
+def clip_polygons_to_tile_extent(
+    polygons: list[list[list[list[float]]]],
+    extent: float = EXTENT,
+) -> list[list[list[list[float]]]]:
+    """Clip MVT polygons to the tile square so neighbour buffers do not double-paint."""
+    clipped: list[list[list[list[float]]]] = []
+    for poly in polygons:
+        rings: list[list[list[float]]] = []
+        for ring in poly:
+            c = _clip_ring_to_rect(ring, 0.0, 0.0, extent, extent)
+            if len(c) >= 4:
+                rings.append(c)
+        if rings:
+            clipped.append(rings)
+    return clipped
+
+
 def _geometry_lines(geometry: dict[str, Any]) -> list[list[list[float]]]:
     if geometry["type"] == "LineString":
         return [geometry["coordinates"]]
@@ -986,10 +1067,12 @@ def _render_vector_tile(
             if props.get("class") not in BUILT_UP_CLASSES:
                 continue
             geometry = _decode_feature_geometry(feature)
-            if geometry:
+            if not geometry:
+                continue
+            for poly in clip_polygons_to_tile_extent(_geometry_polygons(geometry)):
                 image = _draw_polygon_layer(
                     image,
-                    geometry,
+                    {"type": "Polygon", "coordinates": poly},
                     built_up_color,
                     built_up_opacity,
                     render_size=render_size,
@@ -1361,10 +1444,12 @@ def _render_decoded_geometry_to_canvas(
             if props.get("class") not in BUILT_UP_CLASSES:
                 continue
             geometry = _decode_feature_geometry(feature)
-            if geometry:
+            if not geometry:
+                continue
+            for poly in clip_polygons_to_tile_extent(_geometry_polygons(geometry)):
                 tile = _draw_polygon_layer(
                     tile,
-                    geometry,
+                    {"type": "Polygon", "coordinates": poly},
                     built_up_color,
                     built_up_opacity,
                     render_size=tile_render_size,

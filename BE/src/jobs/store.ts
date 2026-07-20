@@ -149,3 +149,18 @@ export async function markJobPaid(
   await saveJob(bucket, job);
   return job;
 }
+
+/** Clear paid unlock after the stripe zip was downloaded (one-time unlock). */
+export async function markJobUnpaid(
+  bucket: R2Bucket | undefined,
+  id: string,
+): Promise<JobRecord | null> {
+  const job = await getJob(bucket, id);
+  if (!job) return null;
+
+  job.paid = false;
+  delete job.paidAt;
+  job.updatedAt = new Date().toISOString();
+  await saveJob(bucket, job);
+  return job;
+}

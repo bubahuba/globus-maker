@@ -13,6 +13,15 @@ services:
       - WORK_DIR=/tmp/globus-jobs
     volumes:
       - processor-data:/tmp/globus-jobs
+      # Live-reload processor Python during local dev (still restart container after big deps changes).
+      - ./container/svg_map.py:/app/svg_map.py:ro
+      - ./container/tile_render.py:/app/tile_render.py:ro
+      - ./container/process.py:/app/process.py:ro
+      - ./container/distort.py:/app/distort.py:ro
+      - ./container/svg_warp.py:/app/svg_warp.py:ro
+      - ./container/stitch.py:/app/stitch.py:ro
+      - ./container/job_queue.py:/app/job_queue.py:ro
+      - ./container/server.py:/app/server.py:ro
 
 volumes:
   processor-data:

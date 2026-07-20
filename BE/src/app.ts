@@ -22,6 +22,7 @@ import {
   isAllowedJobFilename,
   isTerminalStatus,
   markJobPaid,
+  markJobUnpaid,
   saveJob,
   updateJobProgress,
 } from "./jobs/store";
@@ -66,6 +67,14 @@ export function isApiRequest(request: Request): boolean {
 
 function processorBase(env: Env): string {
   return (env.PROCESSOR_URL ?? "").replace(/\/$/, "");
+}
+
+/** Globe stripe zip requires a successful PayPal capture; map zip stays free. */
+function canDownloadZip(job: JobRecord): boolean {
+  if (job.status !== "complete") return false;
+  if (job.artifactsAvailable === false) return false;
+  if (normalizeJobMode(job.request.mode) === "globe" && job.paid !== true) return false;
+  return true;
 }
 
 function normalizeRequest(body: JobRequest): JobRequest & {
@@ -306,8 +315,8 @@ app.get("/api/jobs/:id", async (c) => {
   job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
 
   const hasArtifacts = job.artifactsAvailable !== false;
-  const canDownload = job.status === "complete" && hasArtifacts;
   const mode = normalizeJobMode(job.request.mode);
+  const zipReady = canDownloadZip(job);
   const downloadFilename = jobZipFilename({ ...job.request, mode });
 
   return c.json({
@@ -327,8 +336,8 @@ app.get("/api/jobs/:id", async (c) => {
     artifactsAvailable: hasArtifacts,
     paid: job.paid === true,
     updatedAt: job.updatedAt,
-    downloadUrl: canDownload ? `/api/jobs/${job.id}/download` : null,
-    downloadFilename: canDownload ? downloadFilename : null,
+    downloadUrl: zipReady ? `/api/jobs/${job.id}/download` : null,
+    downloadFilename: zipReady ? downloadFilename : null,
     placeName: job.request.placeName,
     center: job.request.center,
     sideMeters: job.request.sideMeters,
@@ -415,18 +424,21 @@ app.post("/api/jobs/:id/cancel", async (c) => {
 app.get("/api/jobs/:id/download", async (c) => {
   let job = await getJob(c.env.ARTIFACTS, c.req.param("id"));
   if (!job) return c.json({ error: "Job not found" }, 404);
-  if (job.status !== "complete") {
-    return c.json({ error: "Job not complete" }, 409);
-  }
 
   job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
-  if (job.artifactsAvailable === false) {
-    return c.json({ error: "Artifacts already removed" }, 410);
-  }
 
   const mode = normalizeJobMode(job.request.mode);
   if (mode === "globe" && job.paid !== true) {
     return c.json({ error: "Payment required for globe zip download" }, 402);
+  }
+  if (job.status !== "complete") {
+    return c.json({ error: "Job not complete" }, 409);
+  }
+  if (job.artifactsAvailable === false) {
+    return c.json({ error: "Artifacts already removed" }, 410);
+  }
+  if (!canDownloadZip(job)) {
+    return c.json({ error: "Download not available" }, 403);
   }
 
   const zipBytes = await getArtifact(c.env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
@@ -442,7 +454,17 @@ app.get("/api/jobs/:id/download", async (c) => {
   // Client can refresh job status; server deletes zip + previews after the body is buffered.
   headers.set("X-Artifacts-Purged", "1");
 
-  c.executionCtx.waitUntil(purgeJobArtifacts(c.env.ARTIFACTS, job.id));
+  const artifacts = c.env.ARTIFACTS;
+  const jobId = job.id;
+  c.executionCtx.waitUntil(
+    (async () => {
+      await purgeJobArtifacts(artifacts, jobId);
+      // One-time unlock: stripe zip download clears paid so the URL cannot be reused.
+      if (mode === "globe") {
+        await markJobUnpaid(artifacts, jobId);
+      }
+    })(),
+  );
 
   return new Response(zipBytes, { headers });
 });
@@ -470,7 +492,12 @@ app.post("/api/paypal/orders", async (c) => {
   }
 
   try {
-    const order = await createGlobeDownloadOrder(c.env, jobId);
+    const filename = jobZipFilename({ ...job.request, mode: "globe" });
+    const order = await createGlobeDownloadOrder(c.env, {
+      jobId,
+      filename,
+      diameterCm: Number(job.request.diameterCm) || 0,
+    });
     return c.json(order);
   } catch (err) {
     const message = err instanceof Error ? err.message : "PayPal create order failed";
