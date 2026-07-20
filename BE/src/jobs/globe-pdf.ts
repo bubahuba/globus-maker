@@ -27,6 +27,11 @@ function stripeSortKey(name: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** Left→right PDF / preview order: highest index first (matches FE JobOutputs). */
+export function orderStripeNamesForPdf(names: string[]): string[] {
+  return [...names].filter(isStripeName).sort((a, b) => stripeSortKey(b) - stripeSortKey(a));
+}
+
 /**
  * Draw image rotated 90° clockwise.
  * `(x, y)` is the bottom-left of the axis-aligned box after rotation.
@@ -61,9 +66,7 @@ export async function buildGlobeStripesPdf(zipBytes: ArrayBuffer | Uint8Array): 
   const raw = zipBytes instanceof Uint8Array ? zipBytes : new Uint8Array(zipBytes);
   const files = unzipSync(raw);
 
-  const stripeEntries = Object.keys(files)
-    .filter(isStripeName)
-    .sort((a, b) => stripeSortKey(a) - stripeSortKey(b));
+  const stripeEntries = orderStripeNamesForPdf(Object.keys(files));
   if (stripeEntries.length === 0) {
     throw new Error("Zip has no stripe JPEGs (out-*.jpg)");
   }

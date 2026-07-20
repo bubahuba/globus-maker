@@ -6,6 +6,13 @@ export interface PaypalPublicConfig {
 	clientId: string | null;
 	currency: string;
 	amount: string;
+	diameterCm?: number;
+	pricing?: {
+		minCm: number;
+		maxCm: number;
+		minEuro: number;
+		maxEuro: number;
+	};
 }
 
 export function formatPaypalAmountLabel(amount: string, currency: string): string {
@@ -15,19 +22,27 @@ export function formatPaypalAmountLabel(amount: string, currency: string): strin
 	return `${value} ${currency}`;
 }
 
-export async function fetchPaypalConfig(): Promise<PaypalPublicConfig> {
-	const response = await fetch('/api/paypal/config');
+export async function fetchPaypalConfig(diameterCm?: number): Promise<PaypalPublicConfig> {
+	const params = new URLSearchParams();
+	if (diameterCm != null && Number.isFinite(diameterCm)) {
+		params.set('diameterCm', String(diameterCm));
+	}
+	const qs = params.toString();
+	const response = await fetch(`/api/paypal/config${qs ? `?${qs}` : ''}`);
 	if (!response.ok) {
 		throw new Error('Could not load PayPal config');
 	}
 	return (await response.json()) as PaypalPublicConfig;
 }
 
-export async function createPaypalOrder(jobId: string): Promise<{ id: string; alreadyPaid?: boolean }> {
+export async function createPaypalOrder(
+	jobId: string,
+	format: 'zip' | 'pdf' = 'zip'
+): Promise<{ id: string; alreadyPaid?: boolean }> {
 	const response = await fetch('/api/paypal/orders', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ jobId })
+		body: JSON.stringify({ jobId, format })
 	});
 	const body = (await response.json().catch(() => null)) as {
 		id?: string;

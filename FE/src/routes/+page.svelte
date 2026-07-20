@@ -434,8 +434,16 @@
 		<div class="sticky top-4 self-start">
 			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
 				<PlaceSearch onselect={onPlaceSelect} />
-				<div class="h-[420px] overflow-hidden rounded-xl border border-stone-300 shadow-inner">
-					<MapSelector {center} {sideMeters} {mapLayers} onchange={onSelectionChange} />
+				<div
+					class="aspect-square w-full overflow-hidden rounded-xl border border-stone-300 shadow-inner"
+				>
+					<MapSelector
+						{center}
+						{sideMeters}
+						tileZoom={estimate ? clampTileZoom(estimate.zoom) : null}
+						{mapLayers}
+						onchange={onSelectionChange}
+					/>
 				</div>
 
 				{#if jobStatus && jobManifest}
@@ -454,6 +462,7 @@
 						queueLength={jobQueueLength}
 						{downloadFilename}
 						{globeDownloadFormat}
+						diameterCm={(jobMode ?? mode) === 'globe' ? diameterCm : undefined}
 						{artifactsAvailable}
 						paid={jobPaid}
 						onpaid={() => {

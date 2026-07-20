@@ -1,4 +1,6 @@
 import { paypalApiBase, resolvePaypalConfig, type PaypalRuntimeConfig } from "./config";
+import { globeDownloadPriceEuro } from "../../../shared/globe-pricing";
+import type { GlobeDownloadFormat } from "../jobs/filename";
 import type { Env } from "../env";
 
 interface TokenCache {
@@ -75,6 +77,7 @@ export interface CreateOrderDetails {
   jobId: string;
   filename: string;
   diameterCm: number;
+  format?: GlobeDownloadFormat;
 }
 
 export async function createGlobeDownloadOrder(
@@ -85,8 +88,11 @@ export async function createGlobeDownloadOrder(
   if (!cfg) throw new Error("PayPal is not configured");
 
   const note = paypalPaymentNote(details.filename, details.diameterCm);
-  const itemName = details.filename.trim().slice(0, 127) || "Globe stripes zip";
+  const fallbackName =
+    details.format === "pdf" ? "Globe stripes PDF" : "Globe stripes zip";
+  const itemName = details.filename.trim().slice(0, 127) || fallbackName;
   const itemDescription = `Globe diameter ${formatDiameterCm(details.diameterCm)} cm`.slice(0, 127);
+  const amount = globeDownloadPriceEuro(details.diameterCm);
 
   const response = await paypalFetch(cfg, "/v2/checkout/orders", {
     method: "POST",
@@ -100,11 +106,11 @@ export async function createGlobeDownloadOrder(
           invoice_id: `${details.jobId}`.slice(0, 127),
           amount: {
             currency_code: cfg.currency,
-            value: cfg.amount,
+            value: amount,
             breakdown: {
               item_total: {
                 currency_code: cfg.currency,
-                value: cfg.amount,
+                value: amount,
               },
             },
           },
@@ -116,7 +122,7 @@ export async function createGlobeDownloadOrder(
               category: "DIGITAL_GOODS",
               unit_amount: {
                 currency_code: cfg.currency,
-                value: cfg.amount,
+                value: amount,
               },
             },
           ],

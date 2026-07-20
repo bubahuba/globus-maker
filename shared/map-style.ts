@@ -529,13 +529,43 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     sourceLayer: "aeroway",
     type: "fill",
     minzoom: OSM_ZOOM.aerowaysMin,
+    // Apron/terminal vs runway/taxiway footprints (match processor).
     filter: ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false],
-    style: ({ layers }) => ({
-      paint: {
-        "fill-color": layers.airports.color,
-        "fill-opacity": 0.75,
-      },
-    }),
+    style: ({ layers }) => {
+      const apron = layers.airports.color;
+      const runway = lighten(layers.airports.color, 0.12);
+      const taxi = lighten(layers.airports.color, 0.08);
+      return {
+        paint: {
+          "fill-color": [
+            "match",
+            ["get", "class"],
+            "runway",
+            runway,
+            "taxiway",
+            taxi,
+            apron,
+          ],
+          "fill-opacity": [
+            "match",
+            ["get", "class"],
+            "runway",
+            0.9,
+            "taxiway",
+            0.85,
+            "apron",
+            0.75,
+            "aerodrome",
+            0.75,
+            "heliport",
+            0.75,
+            "helipad",
+            0.75,
+            0.55,
+          ],
+        },
+      };
+    },
   },
   {
     id: "aeroway-runway",
@@ -833,9 +863,9 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     style: ({ layers }) =>
       labelStyle(layers.streetNames.color, {
         textField: PLACE_NAME_FIELD,
-        padding: 1,
-        allowOverlap: true,
-        size: ["interpolate", ["linear"], ["zoom"], 11, 12, 14, 14],
+        padding: 2,
+        // Smaller than city/town; collision on so z11 districts don’t pile up.
+        size: ["interpolate", ["linear"], ["zoom"], 11, 9, 14, 11],
       }),
   },
   {
@@ -849,9 +879,8 @@ export const OSM_STYLE_LAYERS: OsmStyleLayerDef[] = [
     style: ({ layers }) =>
       labelStyle(layers.streetNames.color, {
         textField: ["get", "name"],
-        padding: 1,
-        allowOverlap: true,
-        size: 12,
+        padding: 2,
+        size: 9,
       }),
   },
   {

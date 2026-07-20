@@ -12,6 +12,10 @@
 		open?: boolean;
 		jobId: string;
 		filename?: string | null;
+		/** Job globe diameter — drives checkout price (€2–€6). */
+		diameterCm?: number;
+		/** Selected globe download packaging (affects PayPal line item name). */
+		downloadFormat?: 'zip' | 'pdf';
 		/** Full globe zip after successful capture. */
 		ondownload: () => void | Promise<void>;
 		/** Map SVG only — does not unlock or purge zip. */
@@ -23,6 +27,8 @@
 		open = $bindable(false),
 		jobId,
 		filename = null,
+		diameterCm,
+		downloadFormat = 'zip',
 		ondownload,
 		onfreeDownload,
 		ondismiss
@@ -40,7 +46,7 @@
 		config ? formatPaypalAmountLabel(config.amount, config.currency) : '…'
 	);
 
-	const zipLabel = $derived(filename ?? 'zip');
+	const zipLabel = $derived(filename ?? (downloadFormat === 'pdf' ? 'pdf' : 'zip'));
 
 	function close() {
 		if (!open) return;
@@ -137,7 +143,7 @@
 
 		void (async () => {
 			try {
-				const next = await fetchPaypalConfig();
+				const next = await fetchPaypalConfig(diameterCm);
 				if (cancelled) return;
 				config = next;
 				if (!next.configured || !next.clientId) {
@@ -158,7 +164,7 @@
 					},
 					createOrder: async () => {
 						payError = null;
-						const order = await createPaypalOrder(jobId);
+						const order = await createPaypalOrder(jobId, downloadFormat);
 						if (order.alreadyPaid) {
 							await afterPaid();
 							return Promise.reject(new Error('ALREADY_PAID'));
@@ -227,7 +233,8 @@
 				</h2>
 				<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
 					Globe stripe generation takes more compute than a flat map. Pay
-					{amountLabel} with PayPal to unlock the full zip (map + pole caps + stripes).
+					{amountLabel} with PayPal to unlock the full download (map + pole caps + stripes).
+					Price scales with diameter (€2 at 20 cm → €6 at 60 cm).
 					{#if filename}
 						<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
 					{/if}

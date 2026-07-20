@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { zipSync } from "fflate";
 import { PDFDocument } from "pdf-lib";
-import { buildGlobeStripesPdf } from "../src/jobs/globe-pdf";
+import { buildGlobeStripesPdf, orderStripeNamesForPdf } from "../src/jobs/globe-pdf";
 import { jobDownloadFilename, normalizeGlobeDownloadFormat } from "../src/jobs/filename";
 
 function tinyJpeg(width: number, height: number): Uint8Array {
@@ -27,6 +27,12 @@ async function main() {
   assert.equal(
     jobDownloadFilename({ mode: "globe", placeName: "Paris", diameterCm: 25 }, "zip"),
     "Paris-25cm.zip",
+  );
+
+  assert.deepEqual(
+    orderStripeNamesForPdf(["out-00.jpg", "out-02.jpg", "out-01.jpg", "pole-caps.jpg"]),
+    ["out-02.jpg", "out-01.jpg", "out-00.jpg"],
+    "PDF places stripes in descending index (matches FE preview)",
   );
 
   const zip = zipSync({

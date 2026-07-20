@@ -62,6 +62,8 @@
 		downloadFilename?: string | null;
 		/** Globe paid download packaging (zip default). */
 		globeDownloadFormat?: GlobeDownloadFormat;
+		/** Globe diameter used for PayPal price (€2 at 20 cm → €6 at 60 cm). */
+		diameterCm?: number;
 		/** False after zip was downloaded or server TTL purged files. */
 		artifactsAvailable?: boolean;
 		/** Globe zip unlocked after PayPal capture. */
@@ -85,6 +87,7 @@
 		queueLength,
 		downloadFilename = null,
 		globeDownloadFormat = 'zip',
+		diameterCm,
 		artifactsAvailable = true,
 		paid = false,
 		onpaid,
@@ -442,6 +445,8 @@
 		bind:open={paypalDialogOpen}
 		{jobId}
 		filename={paidDownloadName}
+		{diameterCm}
+		downloadFormat={globeDownloadFormat}
 		ondownload={runPaidDownload}
 		onfreeDownload={runFreeMapSvgDownload}
 	/>

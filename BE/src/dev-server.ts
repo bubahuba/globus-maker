@@ -17,7 +17,6 @@ const env: Env = {
   USER_PAYPAL: process.env.USER_PAYPAL,
   PASS_PAYPAL: process.env.PASS_PAYPAL,
   PAYPAL_CURRENCY: process.env.PAYPAL_CURRENCY,
-  PAYPAL_AMOUNT: process.env.PAYPAL_AMOUNT,
 };
 
 const executionCtx = {

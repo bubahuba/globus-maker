@@ -6,6 +6,7 @@
 		flyToSelection,
 		initMap,
 		squareBounds,
+		syncMapToTileZoom,
 		updateMapStyle,
 		type MapSelection
 	} from '@lib/map/leaflet';
@@ -14,11 +15,19 @@
 	interface Props {
 		center?: { lat: number; lng: number } | null;
 		sideMeters?: number;
+		/** Job / preview tile zoom — map view locks to this (via Leaflet = tileZoom + 1). */
+		tileZoom?: number | null;
 		mapLayers: MapLayerStyle;
 		onchange?: (selection: MapSelection) => void;
 	}
 
-	let { center = null, sideMeters = 2500, mapLayers, onchange }: Props = $props();
+	let {
+		center = null,
+		sideMeters = 2500,
+		tileZoom = null,
+		mapLayers,
+		onchange
+	}: Props = $props();
 
 	let mapEl: HTMLDivElement | undefined = $state();
 	let map: import('leaflet').Map | undefined = $state();
@@ -39,7 +48,7 @@
 			marker.setLatLng([lat, lng]);
 		}
 
-		if (fly) flyToSelection(map, { lat, lng });
+		if (fly) flyToSelection(map, { lat, lng }, tileZoom);
 		updateSquare();
 	}
 
@@ -83,17 +92,23 @@
 		map = initialized.map;
 		baseLayer = initialized.baseLayer;
 		if (center) setCenterAt(center.lat, center.lng, false);
+		if (tileZoom != null) syncMapToTileZoom(map, tileZoom);
 
 		map.on('click', (event) => {
 			setCenterAt(event.latlng.lat, event.latlng.lng);
 		});
 
-		requestAnimationFrame(() => {
+		const resizeMap = () => {
 			map?.invalidateSize();
 			baseLayer?.getMaplibreMap().resize();
-		});
+		};
+		requestAnimationFrame(resizeMap);
+
+		const ro = new ResizeObserver(() => resizeMap());
+		ro.observe(mapEl);
 
 		return () => {
+			ro.disconnect();
 			map?.remove();
 		};
 	});
@@ -101,6 +116,11 @@
 	$effect(() => {
 		sideMeters;
 		updateSquare();
+	});
+
+	$effect(() => {
+		if (!map || tileZoom == null || !Number.isFinite(tileZoom)) return;
+		syncMapToTileZoom(map, tileZoom);
 	});
 
 	$effect(() => {
@@ -133,7 +153,7 @@
 	});
 </script>
 
-<div class="relative h-full w-full z-1">
+<div class="relative z-1 h-full w-full">
 	<div bind:this={mapEl} class="absolute inset-0"></div>
 
 	{#if !center}

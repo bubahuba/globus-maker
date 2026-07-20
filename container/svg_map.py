@@ -10,6 +10,8 @@ from typing import Any
 import mapbox_vector_tile
 
 from tile_render import (
+    AEROWAY_RUNWAY_CLASSES,
+    AEROWAY_TAXIWAY_CLASSES,
     BOUNDARY_COUNTRY_COLOR,
     BOUNDARY_DISPUTED_COLOR,
     BOUNDARY_STATE_COLOR,
@@ -32,10 +34,13 @@ from tile_render import (
     ZOOM_AEROWAYS_MIN,
     ZOOM_BUILDINGS_MIN,
     ZOOM_BUILT_UP_MIN,
+    ZOOM_LABELS_HIGHWAY_REFS_MIN,
+    ZOOM_LABELS_PARK_MIN,
     ZOOM_LABELS_PLACES_MIN,
     ZOOM_LABELS_STREETS_MIN,
     ZOOM_LABELS_WATER_MIN,
     _aerodrome_label,
+    _aeroway_polygon_style,
     _aeroway_runway_width,
     _aeroway_taxiway_width,
     _boundary_features,
@@ -43,7 +48,7 @@ from tile_render import (
     _canvas_label_size,
     _darken,
     _decode_feature_geometry,
-    _feature_name,
+    _feature_display_name,
     _geometry_lines,
     _geometry_polygons,
     _is_rail_feature,
@@ -52,6 +57,7 @@ from tile_render import (
     _layer_features,
     _lighten,
     _line_midpoint_and_angle,
+    _place_allowed_at_zoom,
     _resolve_tile_template,
     _street_casing_width,
     _street_line_width,
@@ -190,14 +196,17 @@ class _SvgBuilder:
         color: str,
         font_size: float,
         angle_deg: float = 0.0,
+        *,
+        allow_overlap: bool = False,
     ) -> None:
         # Approximate text box for collision
         w = max(8.0, len(name) * font_size * 0.55)
         h = font_size * 1.2
         box = (x - w / 2, y - h / 2, x + w / 2, y + h / 2)
-        if self._intersects(box):
+        if not allow_overlap and self._intersects(box):
             return
-        self._boxes.append(box)
+        if not allow_overlap:
+            self._boxes.append(box)
         safe = html.escape(name)
         transform = ""
         if abs(angle_deg) > 0.5:
@@ -398,7 +407,6 @@ def _append_tile_geometry(
         airport_color = palette.get("airports", "#d4cfc6")
         runway_color = palette.get("airportRunway", airport_color)
         taxiway_color = _lighten(airport_color, 0.08)
-        airport_opacity = opacity.get("airports", 0.75)
         runway_w = _aeroway_runway_width(zoom, render_scale) * scale
         taxiway_w = _aeroway_taxiway_width(zoom, render_scale) * scale
         for feature in _layer_features(decoded, "aeroway"):
@@ -408,19 +416,25 @@ def _append_tile_geometry(
                 continue
             geom_type = geometry["type"]
             if geom_type in {"Polygon", "MultiPolygon"}:
+                style = _aeroway_polygon_style(
+                    props, airport_color, runway_color, taxiway_color
+                )
+                if not style:
+                    continue
+                fill, opac = style
                 for poly in _geometry_polygons(geometry):
                     svg.add_polygon(
                         "airports",
                         [map_ring(ring) for ring in poly],
-                        airport_color,
-                        airport_opacity,
+                        fill,
+                        opac,
                     )
             elif geom_type in {"LineString", "MultiLineString"}:
                 cls = props.get("class")
-                if cls == "runway":
+                if cls in AEROWAY_RUNWAY_CLASSES:
                     for line in _geometry_lines(geometry):
                         svg.add_line("airport_lines", map_ring(line), runway_color, runway_w)
-                elif cls == "taxiway":
+                elif cls in AEROWAY_TAXIWAY_CLASSES:
                     for line in _geometry_lines(geometry):
                         svg.add_line("airport_lines", map_ring(line), taxiway_color, taxiway_w)
 
@@ -539,7 +553,9 @@ def _append_labels(
                     place_class = props.get("class")
                     if place_class not in PRINT_PLACE_CLASSES:
                         continue
-                    name = _feature_name(props)
+                    if not _place_allowed_at_zoom(str(place_class), label_zoom):
+                        continue
+                    name = _feature_display_name(props)
                     geometry = _decode_feature_geometry(feature)
                     if not name or not geometry:
                         continue
@@ -554,7 +570,10 @@ def _append_labels(
             anchor = to_svg_anchor(geometry, tile_x, tile_y)
             if not anchor:
                 continue
-            font_size = _canvas_label_size(label_zoom, render_scale, "place", props.get("class")) * scale
+            place_class = props.get("class")
+            font_size = (
+                _canvas_label_size(label_zoom, render_scale, "place", place_class) * scale
+            )
             before = len(svg._boxes)
             svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
             if len(svg._boxes) > before:
@@ -566,7 +585,7 @@ def _append_labels(
                     props = feature.get("properties", {})
                     if props.get("class") not in WATER_NAME_CLASSES:
                         continue
-                    name = _feature_name(props)
+                    name = _feature_display_name(props)
                     geometry = _decode_feature_geometry(feature)
                     if not name or not geometry or len(name) > 24:
                         continue
@@ -575,6 +594,65 @@ def _append_labels(
                         continue
                     font_size = _canvas_label_size(label_zoom, render_scale, "water") * scale
                     svg.add_label(anchor[0], anchor[1], name, label_color, max(6.0, font_size))
+
+        if label_zoom >= ZOOM_LABELS_PARK_MIN:
+            for tile_x, tile_y, decoded in decoded_tiles:
+                for feature in _layer_features(decoded, "park"):
+                    name = _feature_display_name(feature.get("properties", {}))
+                    geometry = _decode_feature_geometry(feature)
+                    if not name or not geometry or len(name) > 32:
+                        continue
+                    anchor = to_svg_anchor(geometry, tile_x, tile_y)
+                    if not anchor:
+                        continue
+                    font_size = max(
+                        6.0,
+                        _canvas_label_size(label_zoom, render_scale, "street") * 0.9 * scale,
+                    )
+                    svg.add_label(anchor[0], anchor[1], name, label_color, font_size)
+
+        if label_zoom >= ZOOM_LABELS_HIGHWAY_REFS_MIN:
+            for tile_x, tile_y, decoded in decoded_tiles:
+                for feature in _layer_features(decoded, "transportation_name"):
+                    props = feature.get("properties", {})
+                    if props.get("subclass") == "junction":
+                        continue
+                    if props.get("class") not in {"motorway", "trunk", "primary"}:
+                        continue
+                    ref = props.get("ref")
+                    if not ref:
+                        continue
+                    geometry = _decode_feature_geometry(feature)
+                    if not geometry:
+                        continue
+
+                    def mapper(
+                        coords: list[list[float]], tx=tile_x, ty=tile_y
+                    ) -> list[tuple[float, float]]:
+                        return _map_coords(
+                            coords, tx, ty, min_x, min_y, tile_render_size, scale, ox, oy
+                        )
+
+                    placement = _line_midpoint_and_angle(geometry, mapper)
+                    if not placement:
+                        anchor = to_svg_anchor(geometry, tile_x, tile_y)
+                        if not anchor:
+                            continue
+                        angle = 0.0
+                    else:
+                        anchor, angle = placement
+                    font_size = max(
+                        6.0,
+                        _canvas_label_size(label_zoom, render_scale, "street") * 0.85 * scale,
+                    )
+                    svg.add_label(
+                        anchor[0],
+                        anchor[1],
+                        str(ref),
+                        label_color,
+                        font_size,
+                        angle_deg=angle,
+                    )
 
         if label_zoom >= ZOOM_LABELS_STREETS_MIN:
             street_candidates: list[tuple[int, str, dict[str, Any], int, int]] = []
@@ -586,7 +664,7 @@ def _append_labels(
                         continue
                     if props.get("subclass") == "junction":
                         continue
-                    name = _feature_name(props)
+                    name = _feature_display_name(props)
                     geometry = _decode_feature_geometry(feature)
                     if not name or not geometry or len(name) > 28:
                         continue

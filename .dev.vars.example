@@ -7,5 +7,5 @@ USER_PAYPAL=
 PASS_PAYPAL=
 PAYPAL_CLIENT_ID=
 PAYPAL_CLIENT_SECRET=
+# Amount is diameter-based (€2 at 20 cm → €6 at 60 cm), not a fixed env var.
 PAYPAL_CURRENCY=EUR
-PAYPAL_AMOUNT=5

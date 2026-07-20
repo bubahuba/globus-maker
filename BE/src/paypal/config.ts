@@ -1,4 +1,11 @@
 import type { Env } from "../env";
+import {
+  GLOBE_PRICE_MAX_CM,
+  GLOBE_PRICE_MAX_EUR,
+  GLOBE_PRICE_MIN_CM,
+  GLOBE_PRICE_MIN_EUR,
+  globeDownloadPriceEuro,
+} from "../../../shared/globe-pricing";
 
 export type PaypalMode = "sandbox" | "live";
 
@@ -7,8 +14,6 @@ export interface PaypalRuntimeConfig {
   clientId: string;
   clientSecret: string;
   currency: string;
-  /** Decimal string, e.g. "5.00" */
-  amount: string;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string {
@@ -17,12 +22,6 @@ function firstNonEmpty(...values: Array<string | undefined>): string {
     if (trimmed) return trimmed;
   }
   return "";
-}
-
-function normalizeAmount(raw: string): string {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return "5.00";
-  return n.toFixed(2);
 }
 
 export function resolvePaypalConfig(env: Env): PaypalRuntimeConfig | null {
@@ -38,7 +37,6 @@ export function resolvePaypalConfig(env: Env): PaypalRuntimeConfig | null {
     clientId,
     clientSecret,
     currency: (env.PAYPAL_CURRENCY ?? "EUR").trim().toUpperCase() || "EUR",
-    amount: normalizeAmount(env.PAYPAL_AMOUNT ?? "5"),
   };
 }
 
@@ -46,14 +44,33 @@ export function paypalApiBase(mode: PaypalMode): string {
   return mode === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 }
 
-/** Public fields safe to expose to the browser. */
-export function publicPaypalConfig(env: Env): {
+export interface PaypalPublicConfig {
   configured: boolean;
   mode: PaypalMode;
   clientId: string | null;
   currency: string;
+  /** Charge for the given diameter (or default sample size). */
   amount: string;
-} {
+  /** Diameter used to compute `amount`. */
+  diameterCm: number;
+  pricing: {
+    minCm: number;
+    maxCm: number;
+    minEuro: number;
+    maxEuro: number;
+  };
+}
+
+/** Public fields safe to expose to the browser. */
+export function publicPaypalConfig(env: Env, diameterCm?: number): PaypalPublicConfig {
+  const cm = Number.isFinite(Number(diameterCm)) ? Number(diameterCm) : 25;
+  const amount = globeDownloadPriceEuro(cm);
+  const pricing = {
+    minCm: GLOBE_PRICE_MIN_CM,
+    maxCm: GLOBE_PRICE_MAX_CM,
+    minEuro: GLOBE_PRICE_MIN_EUR,
+    maxEuro: GLOBE_PRICE_MAX_EUR,
+  };
   const cfg = resolvePaypalConfig(env);
   if (!cfg) {
     return {
@@ -61,7 +78,9 @@ export function publicPaypalConfig(env: Env): {
       mode: "sandbox",
       clientId: null,
       currency: "EUR",
-      amount: "5.00",
+      amount,
+      diameterCm: cm,
+      pricing,
     };
   }
   return {
@@ -69,6 +88,8 @@ export function publicPaypalConfig(env: Env): {
     mode: cfg.mode,
     clientId: cfg.clientId,
     currency: cfg.currency,
-    amount: cfg.amount,
+    amount,
+    diameterCm: cm,
+    pricing,
   };
 }

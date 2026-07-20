@@ -496,13 +496,19 @@ app.get("/api/jobs/:id/download", async (c) => {
 });
 
 app.get("/api/paypal/config", (c) => {
-  return c.json(publicPaypalConfig(c.env));
+  const raw = c.req.query("diameterCm");
+  const diameterCm = raw != null && raw !== "" ? Number(raw) : undefined;
+  return c.json(publicPaypalConfig(c.env, diameterCm));
 });
 
 app.post("/api/paypal/orders", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { jobId?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    jobId?: string;
+    format?: string;
+  } | null;
   const jobId = body?.jobId?.trim();
   if (!jobId) return c.json({ error: "jobId is required" }, 400);
+  const format = normalizeGlobeDownloadFormat(body?.format);
 
   const job = await getJob(c.env.ARTIFACTS, jobId);
   if (!job) return c.json({ error: "Job not found" }, 404);
@@ -518,11 +524,12 @@ app.post("/api/paypal/orders", async (c) => {
   }
 
   try {
-    const filename = jobZipFilename({ ...job.request, mode: "globe" });
+    const filename = jobDownloadFilename({ ...job.request, mode: "globe" }, format);
     const order = await createGlobeDownloadOrder(c.env, {
       jobId,
       filename,
       diameterCm: Number(job.request.diameterCm) || 0,
+      format,
     });
     return c.json(order);
   } catch (err) {

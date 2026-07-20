@@ -14,5 +14,4 @@ export interface Env {
   USER_PAYPAL?: string;
   PASS_PAYPAL?: string;
   PAYPAL_CURRENCY?: string;
-  PAYPAL_AMOUNT?: string;
 }

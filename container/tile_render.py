@@ -23,13 +23,14 @@ VECTOR_TILE_MAX_ZOOM = 14
 # Supersample stitched input.jpg vs stripe height (stereographic projection needs extra pixels at poles).
 INPUT_SUPERSAMPLE = 2
 EXTENT = 4096
-# MapLibre sizes are tuned for on-screen tiles; scale down for high-res print output.
-LABEL_PRINT_SCALE = 0.25
+# MapLibre sizes are screen CSS px; scale for high-res print / SVG viewBox so labels
+# stay readable when the map is viewed at ~map-widget size (and still OK on paper).
+LABEL_PRINT_SCALE = 0.85
 LABEL_STROKE_WIDTH = 2
-# Street widths are also multiplied by SVG output scale — keep these low so high-res
-# exports don't produce multi-pixel-thick roads (was ~8px at typical map sizes).
-STREET_PRINT_SCALE = 0.1
-STREET_CASING_PRINT_SCALE = 0.08
+# Street widths are also multiplied by SVG output scale — keep modest so high-res
+# exports don't produce multi-pixel-thick roads.
+STREET_PRINT_SCALE = 0.2
+STREET_CASING_PRINT_SCALE = 0.16
 BOUNDARY_PRINT_SCALE = 0.6
 STREET_EXCLUDE = {"path", "pedestrian", "rail", "transit", "aerialway", "ferry"}
 RAIL_CLASSES = {"rail", "transit"}
@@ -43,6 +44,10 @@ RAIL_SUBCLASSES = {
     "monorail",
     "tram",
 }
+# Apron / terminal pads (not runway footprints — those use runway color).
+AEROWAY_APRON_CLASSES = {"apron", "aerodrome", "heliport", "helipad"}
+AEROWAY_RUNWAY_CLASSES = {"runway"}
+AEROWAY_TAXIWAY_CLASSES = {"taxiway"}
 BOUNDARY_ADMIN_LEVELS = {2, 4}
 BOUNDARY_COUNTRY_COLOR = "#555555"
 BOUNDARY_STATE_COLOR = "#888888"
@@ -58,8 +63,14 @@ BUILT_UP_CLASSES = {"residential", "commercial", "industrial", "retail"}
 ZOOM_BUILT_UP_MIN = 10  # built-up landuse from this zoom up (no upper bound)
 ZOOM_BUILDINGS_MIN = 12
 ZOOM_LABELS_PLACES_MIN = 3
+ZOOM_LABELS_TOWNS_MIN = 6
+ZOOM_LABELS_VILLAGES_MIN = 9
+ZOOM_LABELS_SUBURBS_MIN = 11
 ZOOM_LABELS_WATER_MIN = 9
+ZOOM_LABELS_WATERWAY_MIN = 10
+ZOOM_LABELS_PARK_MIN = 11
 ZOOM_LABELS_STREETS_MIN = 10
+ZOOM_LABELS_HIGHWAY_REFS_MIN = 8
 ZOOM_AEROWAYS_MIN = 10
 
 DEFAULT_BASE_FILL = "landForest"
@@ -590,6 +601,26 @@ def _aerodrome_label(props: dict[str, Any]) -> str | None:
     return None
 
 
+def _aeroway_polygon_style(
+    props: dict[str, Any],
+    airport_color: str,
+    runway_color: str,
+    taxiway_color: str,
+) -> tuple[str, float] | None:
+    """Return (fill_color, opacity) for an aeroway polygon, or None to skip."""
+    cls = props.get("class")
+    if cls in AEROWAY_APRON_CLASSES:
+        return airport_color, 0.75
+    if cls in AEROWAY_RUNWAY_CLASSES:
+        return runway_color, 0.9
+    if cls in AEROWAY_TAXIWAY_CLASSES:
+        return taxiway_color, 0.85
+    # Unknown aeroway areas (gate pads, etc.) — soft apron tint.
+    if cls:
+        return airport_color, 0.55
+    return None
+
+
 def _draw_aeroways(
     image: Image.Image,
     decoded: dict[str, Any],
@@ -606,7 +637,6 @@ def _draw_aeroways(
     airport_color = palette.get("airports", "#d4cfc6")
     runway_color = palette.get("airportRunway", airport_color)
     taxiway_color = _lighten(airport_color, 0.08)
-    airport_opacity = palette.get("opacity", {}).get("airports", 0.75)
     runway_w = _aeroway_runway_width(zoom, render_scale)
     taxiway_w = _aeroway_taxiway_width(zoom, render_scale)
 
@@ -617,16 +647,20 @@ def _draw_aeroways(
             continue
         geom_type = geometry["type"]
         if geom_type in {"Polygon", "MultiPolygon"}:
+            style = _aeroway_polygon_style(props, airport_color, runway_color, taxiway_color)
+            if not style:
+                continue
+            fill, opac = style
             image = _draw_polygon_layer(
                 image,
                 geometry,
-                airport_color,
-                airport_opacity,
+                fill,
+                opac,
                 render_size=render_size,
             )
         elif geom_type in {"LineString", "MultiLineString"}:
             cls = props.get("class")
-            if cls == "runway":
+            if cls in AEROWAY_RUNWAY_CLASSES:
                 image = _draw_line_layer(
                     image,
                     geometry,
@@ -635,7 +669,7 @@ def _draw_aeroways(
                     1.0,
                     render_size=render_size,
                 )
-            elif cls == "taxiway":
+            elif cls in AEROWAY_TAXIWAY_CLASSES:
                 image = _draw_line_layer(
                     image,
                     geometry,
@@ -720,6 +754,9 @@ def _label_font_size(zoom: int, kind: str = "default", place_class: str | None =
             return _interp_linear(zoom, 4, 11, 12, 14)
         if place_class in {"city", "town"}:
             return _interp_linear(zoom, 4, 10, 12, 13)
+        # Districts — keep modest at z11 so they don’t dominate the map.
+        if place_class in {"suburb", "neighbourhood", "quarter"}:
+            return _interp_linear(zoom, 11, 8, 14, 10)
         return _interp_linear(zoom, 4, 9, 12, 11)
     return _interp_linear(zoom, 8, 10, 14, 13)
 
@@ -752,6 +789,15 @@ def _line_midpoint_and_angle(
 
 def _feature_name(props: dict[str, Any]) -> str | None:
     for key in ("name", "name:latin", "name_en", "name_int", "ref"):
+        value = props.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _feature_display_name(props: dict[str, Any]) -> str | None:
+    """Name fields only (no ``ref``) — matches MapLibre street/place label filters."""
+    for key in ("name", "name:latin", "name_en", "name_int"):
         value = props.get(key)
         if value:
             return str(value)
@@ -800,8 +846,36 @@ PLACE_LABEL_PRIORITY = {
     "suburb": 6,
     "hamlet": 7,
     "neighbourhood": 8,
+    "quarter": 8,
 }
-PRINT_PLACE_CLASSES = {"country", "state", "region", "city", "town"}
+# Match FE MapLibre place layers (city → suburb), not city/town only.
+PRINT_PLACE_CLASSES = {
+    "country",
+    "state",
+    "region",
+    "city",
+    "town",
+    "village",
+    "suburb",
+    "neighbourhood",
+    "quarter",
+    "hamlet",
+}
+
+
+def _place_allowed_at_zoom(place_class: str, zoom: int) -> bool:
+    """Zoom gates aligned with shared/map-style.ts OSM_ZOOM place bands."""
+    if place_class in {"country", "state", "region", "city"}:
+        return zoom >= ZOOM_LABELS_PLACES_MIN
+    if place_class == "town":
+        return zoom >= ZOOM_LABELS_TOWNS_MIN
+    if place_class == "village":
+        return zoom >= ZOOM_LABELS_VILLAGES_MIN
+    if place_class in {"suburb", "neighbourhood", "quarter"}:
+        return zoom >= ZOOM_LABELS_SUBURBS_MIN
+    if place_class == "hamlet":
+        return zoom >= ZOOM_LABELS_SUBURBS_MIN
+    return False
 # OMT classifies residential/unclassified as ``minor``. At z11 tiles mostly carry
 # motorway/trunk names; minor/residential names appear from z12+.
 STREET_NAME_CLASSES = {
@@ -943,7 +1017,9 @@ def _overlay_labels(
                 place_class = props.get("class")
                 if place_class not in PRINT_PLACE_CLASSES:
                     continue
-                name = _feature_name(props)
+                if not _place_allowed_at_zoom(str(place_class), label_zoom):
+                    continue
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry:
                     continue
@@ -963,7 +1039,7 @@ def _overlay_labels(
                 props = feature.get("properties", {})
                 if props.get("class") not in WATER_NAME_CLASSES:
                     continue
-                name = _feature_name(props)
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry or len(name) > 24:
                     continue
@@ -972,6 +1048,45 @@ def _overlay_labels(
                     continue
                 font_size = _canvas_label_size(label_zoom, render_scale, "water")
                 base = placer.place(base, anchor, name, label_color, font_size)
+
+        if label_zoom >= ZOOM_LABELS_PARK_MIN:
+            for feature in _layer_features(decoded, "park"):
+                props = feature.get("properties", {})
+                name = _feature_display_name(props)
+                geometry = _decode_feature_geometry(feature)
+                if not name or not geometry or len(name) > 32:
+                    continue
+                anchor = _label_anchor(geometry, render_size)
+                if not anchor:
+                    continue
+                font_size = max(8, round(_canvas_label_size(label_zoom, render_scale, "street") * 0.9))
+                base = placer.place(base, anchor, name, label_color, font_size)
+
+        if label_zoom >= ZOOM_LABELS_HIGHWAY_REFS_MIN:
+            for feature in _layer_features(decoded, "transportation_name"):
+                props = feature.get("properties", {})
+                if props.get("subclass") == "junction":
+                    continue
+                if props.get("class") not in {"motorway", "trunk", "primary"}:
+                    continue
+                ref = props.get("ref")
+                if not ref:
+                    continue
+                geometry = _decode_feature_geometry(feature)
+                if not geometry:
+                    continue
+                placement = _line_midpoint_and_angle(
+                    geometry, lambda coords: _to_pixels(coords, render_size)
+                )
+                if not placement:
+                    anchor = _label_anchor(geometry, render_size)
+                    if not anchor:
+                        continue
+                    angle = 0.0
+                else:
+                    anchor, angle = placement
+                font_size = max(8, round(_canvas_label_size(label_zoom, render_scale, "street") * 0.85))
+                base = placer.place(base, anchor, str(ref), label_color, font_size, angle)
 
         if label_zoom >= ZOOM_LABELS_STREETS_MIN:
             street_candidates: list[tuple[int, str, dict[str, Any]]] = []
@@ -983,7 +1098,7 @@ def _overlay_labels(
                 # Skip motorway exit/junction points (crowd labels; not street names).
                 if props.get("subclass") == "junction":
                     continue
-                name = _feature_name(props)
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry or len(name) > 28:
                     continue
@@ -1629,7 +1744,9 @@ def _overlay_labels_world(
                 place_class = props.get("class")
                 if place_class not in PRINT_PLACE_CLASSES:
                     continue
-                name = _feature_name(props)
+                if not _place_allowed_at_zoom(str(place_class), label_zoom):
+                    continue
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry:
                     continue
@@ -1656,7 +1773,7 @@ def _overlay_labels_world(
                 props = feature.get("properties", {})
                 if props.get("class") not in WATER_NAME_CLASSES:
                     continue
-                name = _feature_name(props)
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry or len(name) > 24:
                     continue
@@ -1666,10 +1783,51 @@ def _overlay_labels_world(
                 font_size = _canvas_label_size(label_zoom, render_scale, "water")
                 base = placer.place(base, anchor, name, label_color, font_size)
 
+    if label_zoom >= ZOOM_LABELS_PARK_MIN:
+        for tile_x, tile_y, decoded in decoded_tiles:
+            for feature in _layer_features(decoded, "park"):
+                props = feature.get("properties", {})
+                name = _feature_display_name(props)
+                geometry = _decode_feature_geometry(feature)
+                if not name or not geometry or len(name) > 32:
+                    continue
+                anchor = _label_anchor_canvas(geometry, tile_x, tile_y, min_x, min_y, tile_render_size)
+                if not anchor:
+                    continue
+                font_size = max(8, round(_canvas_label_size(label_zoom, render_scale, "street") * 0.9))
+                base = placer.place(base, anchor, name, label_color, font_size)
+
+    if label_zoom >= ZOOM_LABELS_HIGHWAY_REFS_MIN:
+        for tile_x, tile_y, decoded in decoded_tiles:
+            to_pixels = _make_pixel_mapper(tile_x, tile_y, min_x, min_y, tile_render_size)
+            for feature in _layer_features(decoded, "transportation_name"):
+                props = feature.get("properties", {})
+                if props.get("subclass") == "junction":
+                    continue
+                if props.get("class") not in {"motorway", "trunk", "primary"}:
+                    continue
+                ref = props.get("ref")
+                if not ref:
+                    continue
+                geometry = _decode_feature_geometry(feature)
+                if not geometry:
+                    continue
+                placement = _line_midpoint_and_angle(geometry, to_pixels)
+                if not placement:
+                    anchor = _label_anchor_canvas(
+                        geometry, tile_x, tile_y, min_x, min_y, tile_render_size
+                    )
+                    if not anchor:
+                        continue
+                    angle = 0.0
+                else:
+                    anchor, angle = placement
+                font_size = max(8, round(_canvas_label_size(label_zoom, render_scale, "street") * 0.85))
+                base = placer.place(base, anchor, str(ref), label_color, font_size, angle)
+
     if label_zoom >= ZOOM_LABELS_STREETS_MIN:
         street_candidates: list[tuple[int, str, dict[str, Any], int, int]] = []
         for tile_x, tile_y, decoded in decoded_tiles:
-            to_pixels = _make_pixel_mapper(tile_x, tile_y, min_x, min_y, tile_render_size)
             for feature in _layer_features(decoded, "transportation_name"):
                 props = feature.get("properties", {})
                 road_class = props.get("class")
@@ -1677,7 +1835,7 @@ def _overlay_labels_world(
                     continue
                 if props.get("subclass") == "junction":
                     continue
-                name = _feature_name(props)
+                name = _feature_display_name(props)
                 geometry = _decode_feature_geometry(feature)
                 if not name or not geometry or len(name) > 28:
                     continue
