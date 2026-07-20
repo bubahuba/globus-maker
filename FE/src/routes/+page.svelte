@@ -425,38 +425,38 @@
 	</header>
 
 	<div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-		<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
-			<PlaceSearch onselect={onPlaceSelect} />
-			<div class="h-[420px] overflow-hidden rounded-xl border border-stone-300 shadow-inner">
-				<MapSelector {center} {sideMeters} {mapLayers} onchange={onSelectionChange} />
-			</div>
+		<div class="sticky top-4 self-start">
+			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
+				<PlaceSearch onselect={onPlaceSelect} />
+				<div class="h-[420px] overflow-hidden rounded-xl border border-stone-300 shadow-inner">
+					<MapSelector {center} {sideMeters} {mapLayers} onchange={onSelectionChange} />
+				</div>
 
-			{#if jobStatus && jobManifest}
-				<JobCard
-					{jobId}
-					status={jobStatus}
-					progress={jobProgress}
-					manifest={jobManifest}
-					mode={jobMode ?? mode}
-					stripeCount={(jobMode ?? mode) === 'globe' ? stripes : 0}
-					error={jobError}
-					stepCurrent={jobStepCurrent}
-					stepTotal={jobStepTotal}
-					stepUnit={jobStepUnit}
-					queuePosition={jobQueuePosition}
-					queueLength={jobQueueLength}
-					{downloadFilename}
-					{artifactsAvailable}
-					ondownloaded={() => {
-						artifactsAvailable = false;
-						jobFiles = [];
-						downloadFilename = null;
-					}}
-				/>
-			{/if}
-
-
-		</section>
+				{#if jobStatus && jobManifest}
+					<JobCard
+						{jobId}
+						status={jobStatus}
+						progress={jobProgress}
+						manifest={jobManifest}
+						mode={jobMode ?? mode}
+						stripeCount={(jobMode ?? mode) === 'globe' ? stripes : 0}
+						error={jobError}
+						stepCurrent={jobStepCurrent}
+						stepTotal={jobStepTotal}
+						stepUnit={jobStepUnit}
+						queuePosition={jobQueuePosition}
+						queueLength={jobQueueLength}
+						{downloadFilename}
+						{artifactsAvailable}
+						ondownloaded={() => {
+							artifactsAvailable = false;
+							jobFiles = [];
+							downloadFilename = null;
+						}}
+					/>
+				{/if}
+			</section>
+		</div>
 
 		<aside class="space-y-4">
 			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
