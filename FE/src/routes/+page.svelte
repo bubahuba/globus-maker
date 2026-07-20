@@ -103,6 +103,16 @@
 		!!jobId && jobStatus != null && jobStatus !== 'complete' && jobStatus !== 'failed'
 	);
 
+	const generateButtonLabel = $derived(
+		submitting
+			? 'Generating…'
+			: !center
+				? 'Select a place first'
+				: mode === 'map'
+					? 'Generate map'
+					: 'Generate globe stripes'
+	);
+
 	function setJobInUrl(id: string | null) {
 		const url = new URL(page.url);
 		if (id) url.searchParams.set('job', id);
@@ -608,15 +618,7 @@
 					disabled={submitting || !!estimateError || !center}
 					class="w-full rounded-xl bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-900 disabled:cursor-not-allowed disabled:bg-stone-300"
 				>
-					{#if submitting}
-						Generating…
-					{:else if !center}
-						Select a place first
-					{:else if mode === 'map'}
-						Generate map
-					{:else}
-						Generate globe stripes
-					{/if}
+					{generateButtonLabel}
 				</button>
 			</div>
 

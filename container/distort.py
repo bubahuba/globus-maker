@@ -10,6 +10,7 @@ Primary paths use svg_warp / slize.pl for stripes. This module still provides:
 
 from __future__ import annotations
 
+import io
 import math
 import shutil
 import subprocess
@@ -17,6 +18,8 @@ import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+from PIL.ExifTags import Base as ExifBase
+from PIL.TiffImagePlugin import IFDRational
 
 from svg_warp import NONA_MID_EDGE_Y_FRAC
 
@@ -31,6 +34,8 @@ SPHERE_PREVIEW_MAX_EDGE = 6000
 
 # Print scale matches BE ``stripeHeightPx = diameterCm × 160``.
 PRINT_PX_PER_CM = 160.0
+# Inch density for JFIF/DPI tags (printers typically read inches).
+PRINT_DPI = PRINT_PX_PER_CM * 2.54
 # Physical circular cover cut diameter glued over converging stripe tips.
 POLE_CAP_DIAMETER_CM = 5.0
 # Cap imagery is slightly larger than the 1:1 prewarp→stripe match for glue overlap.
@@ -46,6 +51,10 @@ CUT_LINE_COLOR = (255, 220, 0)
 CUT_LINE_ENLARGE = 1.04
 # ~0.15 mm at print DPI — thin enough to stay a guide, thick enough to see.
 CUT_LINE_STROKE_CM = 0.015
+
+# UI stripe preview upload (disk/zip keep full resolution).
+STRIPE_PREVIEW_MAX_HEIGHT = 500
+STRIPE_PREVIEW_JPEG_QUALITY = 85
 
 
 def stripe_cut_line_half_width(
@@ -96,6 +105,71 @@ def stripe_cut_line_polygon(
     return left + right
 
 
+def print_dpi(px_per_cm: float = PRINT_PX_PER_CM) -> tuple[float, float]:
+    """JFIF/DPI tuple for ``px_per_cm`` so 100% print matches designed cm size."""
+    if px_per_cm <= 0:
+        raise ValueError("px_per_cm must be positive")
+    dpi = px_per_cm * 2.54
+    return (dpi, dpi)
+
+
+def print_size_cm(width_px: int, height_px: int, *, px_per_cm: float = PRINT_PX_PER_CM) -> tuple[float, float]:
+    """Physical width × height in cm at the project print scale."""
+    if px_per_cm <= 0:
+        raise ValueError("px_per_cm must be positive")
+    return width_px / px_per_cm, height_px / px_per_cm
+
+
+def _print_exif(px_per_cm: float = PRINT_PX_PER_CM) -> Image.Exif:
+    """EXIF resolution in cm (unit=3) matching ``PRINT_PX_PER_CM``."""
+    exif = Image.Exif()
+    dens = IFDRational(int(round(px_per_cm)), 1)
+    exif[ExifBase.XResolution] = dens
+    exif[ExifBase.YResolution] = dens
+    exif[ExifBase.ResolutionUnit] = 3  # centimeters
+    return exif
+
+
+def save_print_jpeg(
+    img: Image.Image,
+    dest: Path,
+    *,
+    quality: int = JPEG_QUALITY,
+    px_per_cm: float = PRINT_PX_PER_CM,
+) -> None:
+    """Save JPEG with print density so 100% size prints at the designed cm size."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(
+        dest,
+        format="JPEG",
+        quality=quality,
+        optimize=True,
+        dpi=print_dpi(px_per_cm),
+        exif=_print_exif(px_per_cm),
+    )
+
+
+def jpeg_preview_bytes(
+    path: Path,
+    *,
+    max_height: int = STRIPE_PREVIEW_MAX_HEIGHT,
+    quality: int = STRIPE_PREVIEW_JPEG_QUALITY,
+) -> bytes:
+    """Return JPEG bytes scaled to ``max_height`` (width proportional). Disk file unchanged."""
+    if max_height < 1:
+        raise ValueError("max_height must be positive")
+    with Image.open(path) as src:
+        img = src.convert("RGB")
+        width, height = img.size
+        if height > max_height:
+            new_width = max(1, int(round(width * max_height / height)))
+            img = img.resize((new_width, max_height), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+
+
 def draw_stripe_cut_line(
     image_path: Path,
     dest: Path | None = None,
@@ -109,6 +183,7 @@ def draw_stripe_cut_line(
 
     The lens follows sinusoidal meridians (classic globe gore / football shape),
     fattened by ``enlarge`` so adjacent cut stripes share a little glue overlap.
+    Also stamps print density (``PRINT_PX_PER_CM``) so 100% print matches cm size.
     """
     image_path = Path(image_path)
     dest = Path(dest) if dest is not None else image_path
@@ -124,18 +199,17 @@ def draw_stripe_cut_line(
         draw = ImageDraw.Draw(img)
         draw.line(poly + [poly[0]], fill=color, width=stroke_px, joint="curve")
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.resolve() == image_path.resolve():
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, dir=dest.parent) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            img.save(tmp_path, format="JPEG", quality=quality, optimize=True)
+            save_print_jpeg(img, tmp_path, quality=quality)
             tmp_path.replace(dest)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
     else:
-        img.save(dest, format="JPEG", quality=quality, optimize=True)
+        save_print_jpeg(img, dest, quality=quality)
     return dest
 
 
@@ -411,6 +485,7 @@ def build_pole_caps(
     - large yellow cut circle at ``cap_diameter_cm``
     - small yellow centre mark for aligning the cut-out
     Outside both masks is white.
+    Print density matches stripes (``PRINT_PX_PER_CM``) for 100% size printing.
     """
     image_path = Path(image_path)
     dest = Path(dest)
@@ -472,11 +547,10 @@ def build_pole_caps(
     canvas.paste(north, (0, 0))
     canvas.paste(south, (side + gap, 0))
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False, dir=dest.parent) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        canvas.save(tmp_path, format="JPEG", quality=quality, optimize=True)
+        save_print_jpeg(canvas, tmp_path, quality=quality)
         tmp_path.replace(dest)
     except Exception:
         tmp_path.unlink(missing_ok=True)

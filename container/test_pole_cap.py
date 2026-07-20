@@ -11,6 +11,7 @@ from distort import (
     POLE_CAP_DIAMETER_CM,
     POLE_CAP_ENLARGE,
     POLE_CAP_MASK_BLEED,
+    PRINT_DPI,
     PRINT_PX_PER_CM,
     build_pole_caps,
     pole_cap_cut_radius_px,
@@ -160,6 +161,14 @@ def test_build_pole_caps_cut_guides_and_bleed() -> None:
         gx = side + gap // 2
         gr, gg, gb = out.getpixel((gx, side // 2))
         assert gr > 250 and gg > 250 and gb > 250, f"gap: {(gr, gg, gb)}"
+
+        # Same print density as stripes (100% print → designed cm size).
+        meta = Image.open(dest)
+        dpi = meta.info.get("dpi")
+        assert dpi is not None
+        assert abs(dpi[0] - PRINT_DPI) < 0.6
+        assert abs(dpi[1] - PRINT_DPI) < 0.6
+        assert abs(meta.size[1] / PRINT_PX_PER_CM - 5.0 * POLE_CAP_MASK_BLEED) < 0.02
 
 
 if __name__ == "__main__":

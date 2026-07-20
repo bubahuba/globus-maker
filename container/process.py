@@ -10,9 +10,11 @@ import httpx
 
 from distort import (
     SPHERE_PREVIEW_MAX_EDGE,
+    STRIPE_PREVIEW_MAX_HEIGHT,
     build_depolar_sphere_preview,
     build_pole_caps,
     draw_stripe_cut_line,
+    jpeg_preview_bytes,
     rasterize_svg,
 )
 from job_queue import JobCancelled
@@ -103,8 +105,17 @@ def _is_complete_file(path: Path) -> bool:
         return False
 
 
-async def upload_job_file(callback_url: str | None, path: Path) -> bool:
-    """Upload a generated artifact so the UI can preview it while the job runs."""
+async def upload_job_file(
+    callback_url: str | None,
+    path: Path,
+    *,
+    preview_max_height: int | None = None,
+) -> bool:
+    """Upload a generated artifact so the UI can preview it while the job runs.
+
+    When ``preview_max_height`` is set for a JPEG, uploads a downscaled copy and
+    leaves the on-disk original untouched (zip packaging uses full size).
+    """
     base = _files_base_url(callback_url)
     if not base or not path.is_file():
         return False
@@ -112,7 +123,12 @@ async def upload_job_file(callback_url: str | None, path: Path) -> bool:
         return False
     url = f"{base}/{path.name}"
     try:
-        data = path.read_bytes()
+        if preview_max_height is not None and path.suffix.lower() in {".jpg", ".jpeg"}:
+            data = await asyncio.to_thread(
+                jpeg_preview_bytes, path, max_height=preview_max_height
+            )
+        else:
+            data = path.read_bytes()
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.put(
                 url,
@@ -143,28 +159,21 @@ async def upload_sphere_preview_from_map(
 ) -> bool:
     """DePolar-unwrap the stitched square map (``input.svg``) for the globe viewer.
 
-    Applies ``background_color`` (empty fill) as the SVG root background so empty
-    areas on the sphere match stripe empty-space coloring.
+    Keeps the SVG land canvas (Base land fill). ``background_color`` (Empty fill)
+    is only used for ImageMagick letterboxing / DePolar virtual pixels outside the
+    map square — not painted over the continents.
     """
     if not source.is_file():
         return False
     preview = work_dir / SPHERE_PREVIEW_NAME
     raster_tmp: Path | None = None
-    sphere_svg: Path | None = None
     try:
         map_source = source
         if source.suffix.lower() == ".svg":
-            sphere_svg = work_dir / "_sphere_basefill.svg"
-            await asyncio.to_thread(
-                _apply_svg_base_fill,
-                source,
-                sphere_svg,
-                background_color,
-            )
             raster_tmp = work_dir / "_sphere_src.jpg"
             await asyncio.to_thread(
                 rasterize_svg,
-                sphere_svg,
+                source,
                 raster_tmp,
                 max_edge=SPHERE_PREVIEW_MAX_EDGE,
                 background_color=background_color,
@@ -184,26 +193,10 @@ async def upload_sphere_preview_from_map(
     finally:
         if raster_tmp is not None:
             raster_tmp.unlink(missing_ok=True)
-        if sphere_svg is not None:
-            sphere_svg.unlink(missing_ok=True)
     ok = await upload_job_file(callback_url, preview)
     if not ok:
         print(f"[globus] sphere preview upload failed ({SPHERE_PREVIEW_NAME})", flush=True)
     return ok
-
-
-def _apply_svg_base_fill(src: Path, dest: Path, fill: str) -> Path:
-    """Copy SVG and set the root ``style="background:…"`` to the base-fill color."""
-    import xml.etree.ElementTree as ET
-
-    from svg_warp import set_svg_background
-
-    tree = ET.parse(src)
-    root = tree.getroot()
-    set_svg_background(root, fill)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(dest, encoding="utf-8", xml_declaration=True)
-    return dest
 
 
 async def run_slize(
@@ -303,7 +296,7 @@ def create_zip(
     stripe_files: list[Path],
     zip_path: Path,
     *,
-    extras: tuple[str, ...] = (INPUT_SVG, INPUT_DISTORTED_SVG),
+    extras: tuple[str, ...] = (INPUT_SVG,),
     on_file_progress: Callable[[int, int], None] | None = None,
 ) -> None:
     files: list[Path] = []
@@ -469,12 +462,14 @@ async def _prewarp_for_stripes(
     base_fill: str,
     raster_max_edge: int,
 ) -> Path:
-    """BarrelInverse prewarp + full-res JPEG for ``slize.pl`` (globe / stripes only)."""
+    """BarrelInverse prewarp + full-res JPEG for ``slize.pl`` (globe / stripes only).
+
+    ``input-distorted.svg`` stays on disk for rasterization only — not uploaded or zipped.
+    """
     input_distorted_svg = work_dir / INPUT_DISTORTED_SVG
 
     _ensure_not_cancelled(cancel_event)
     await asyncio.to_thread(warp_svg_barrel, input_svg, input_distorted_svg)
-    await upload_job_file(callback_url, input_distorted_svg)
 
     _ensure_not_cancelled(cancel_event)
     input_distorted_jpg = work_dir / INPUT_DISTORTED_JPG
@@ -618,7 +613,9 @@ async def _process_job_globe(
         )
 
     async def on_stripe_ready(path: Path) -> bool:
-        return await upload_job_file(callback_url, path)
+        return await upload_job_file(
+            callback_url, path, preview_max_height=STRIPE_PREVIEW_MAX_HEIGHT
+        )
 
     stripe_files = await run_slize(
         work_dir,
@@ -644,7 +641,7 @@ async def _process_job_globe(
     return await _package_and_finish(
         work_dir,
         stripe_files,
-        (INPUT_SVG, INPUT_DISTORTED_SVG, POLE_CAPS_JPG),
+        (INPUT_SVG, POLE_CAPS_JPG),
         callback_url=callback_url,
         schedule_progress=schedule_progress,
         cancel_event=cancel_event,

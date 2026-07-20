@@ -12,7 +12,7 @@
 		revision?: string | null;
 		/** False after download/TTL — server deleted preview files. */
 		artifactsAvailable?: boolean;
-		/** map = square only; globe = SVG maps + JPEG stripes. */
+		/** map = square only; globe = stitched map SVG + JPEG stripes. */
 		mode?: JobMode | null;
 		/** Map-mode format; Globe maps are always SVG. */
 		outputFormat?: OutputFormat | null;
@@ -54,10 +54,7 @@
 
 	const mapSlots = $derived.by(() => {
 		if (effectiveMode === 'globe') {
-			return [
-				{ filename: 'input.svg', label: 'Stitched map' },
-				{ filename: 'input-distorted.svg', label: 'Prewarped map' }
-			] as const;
+			return [{ filename: 'input.svg', label: 'Stitched map' }] as const;
 		}
 		// Prefer whatever the job actually uploaded (globe jobs only have SVG;
 		// map jpg/svg exports differ). Fall back to outputFormat while waiting.
@@ -134,15 +131,12 @@
 			return null;
 		}
 
-		// Globe: stitch → sphere → prewarp → pole caps → stripes (in order).
+		// Globe: stitch → sphere → pole caps → stripes (in order).
 		if (!fileSet.has('input.svg')) {
 			return { kind: 'map', filename: 'input.svg' };
 		}
 		if (!fileSet.has('input-distorted-preview.jpg')) {
 			return { kind: 'sphere' };
-		}
-		if (!fileSet.has('input-distorted.svg')) {
-			return { kind: 'map', filename: 'input-distorted.svg' };
 		}
 		if (!fileSet.has('pole-caps.jpg')) {
 			return { kind: 'pole-caps' };
@@ -183,9 +177,7 @@
 		effectiveMode === 'globe' &&
 			(Boolean(poleCapsFile) ||
 				(showPlaceholders &&
-					(fileSet.has('input-distorted.svg') ||
-						fileSet.has('input-distorted-preview.jpg') ||
-						stitchedReady)))
+					(fileSet.has('input-distorted-preview.jpg') || stitchedReady)))
 	);
 
 	const showPreviews = $derived(artifactsAvailable || files.length > 0);
@@ -197,7 +189,7 @@
 	const previewHelperText = $derived(
 		effectiveMode === 'map'
 			? 'The square map appears here when stitching finishes.'
-			: 'SVG maps, sphere preview, pole caps, and JPEG stripes appear here as each file finishes processing.'
+			: 'The stitched map, sphere preview, pole caps, and JPEG stripes appear here as each file finishes processing.'
 	);
 
 	/** Per-filename cache-bust frozen when the file first appears; reset on jobId change. */

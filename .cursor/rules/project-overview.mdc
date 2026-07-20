@@ -35,5 +35,5 @@ Individual services: `dev:processor`, `dev:api`, `dev:fe`. Skip processor: `npm 
 - Map layer types/logic live in `shared/map-style.ts` — don't duplicate
 - Tile math lives in `BE/src/osm/tile-math.ts`; run `npm test` after changes
 - Modes: `map` | `globe`. Stripe height: `diameterCm × 160` px; Map size: `squareSidePx`
-- Always stitch via SVG (`input.svg`). Map: zip `input.svg`/`input.jpg` only. Globe: sphere DePolar from `input.svg`; prewarp → `input-distorted.svg` + `pole-caps.jpg` + `slize.pl` → `out-*.jpg`
+- Always stitch via SVG (`input.svg`). Map: zip `input.svg`/`input.jpg` only. Globe: sphere DePolar from `input.svg`; internal prewarp → `input-distorted.jpg` + `pole-caps.jpg` + `slize.pl` → `out-*.jpg` (distorted SVG not shipped)
 - Job statuses: `queued` → `fetching_tiles` → `stitching` → (`projecting` globe only) → `packaging` → `complete` | `failed`
