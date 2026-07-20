@@ -1,7 +1,18 @@
 <script lang="ts">
-	import { downloadJobMapSvg, downloadJobZip, mapSvgFilenameFromZip } from '@lib/api/jobs';
+	import {
+		downloadJobMapSvg,
+		downloadJobZip,
+		mapSvgFilenameFromZip,
+		withDownloadExtension
+	} from '@lib/api/jobs';
 	import PaypalCheckoutDialog from '@lib/components/PaypalCheckoutDialog.svelte';
-	import type { CreateJobResponse, JobMode, JobStatus, StepUnit } from '@lib/types';
+	import type {
+		CreateJobResponse,
+		GlobeDownloadFormat,
+		JobMode,
+		JobStatus,
+		StepUnit
+	} from '@lib/types';
 	import { clampTileZoom } from '@shared/tile-constants';
 
 	type Manifest = CreateJobResponse['manifest'];
@@ -49,6 +60,8 @@
 		queuePosition?: number;
 		queueLength?: number;
 		downloadFilename?: string | null;
+		/** Globe paid download packaging (zip default). */
+		globeDownloadFormat?: GlobeDownloadFormat;
 		/** False after zip was downloaded or server TTL purged files. */
 		artifactsAvailable?: boolean;
 		/** Globe zip unlocked after PayPal capture. */
@@ -71,11 +84,18 @@
 		queuePosition,
 		queueLength,
 		downloadFilename = null,
+		globeDownloadFormat = 'zip',
 		artifactsAvailable = true,
 		paid = false,
 		onpaid,
 		ondownloaded
 	}: Props = $props();
+
+	const paidDownloadName = $derived(
+		mode === 'globe'
+			? withDownloadExtension(downloadFilename, globeDownloadFormat)
+			: downloadFilename
+	);
 
 	let downloading = $state(false);
 	let downloadError = $state<string | null>(null);
@@ -95,7 +115,8 @@
 		downloading = true;
 		downloadError = null;
 		try {
-			await downloadJobZip(jobId, downloadFilename);
+			const format = mode === 'globe' ? globeDownloadFormat : 'zip';
+			await downloadJobZip(jobId, paidDownloadName, format);
 			ondownloaded?.();
 		} catch (err) {
 			downloadError = err instanceof Error ? err.message : 'Download failed';
@@ -325,7 +346,7 @@
 				disabled={downloading}
 				class="shrink-0 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
 			>
-				{downloading ? 'Downloading…' : `Download ${downloadFilename ?? 'zip'}`}
+				{downloading ? 'Downloading…' : `Download ${paidDownloadName ?? 'zip'}`}
 			</button>
 		{:else if status === 'complete' && jobId && !artifactsAvailable}
 			<p class="shrink-0 text-sm text-stone-500">Server files removed after download.</p>
@@ -420,7 +441,7 @@
 	<PaypalCheckoutDialog
 		bind:open={paypalDialogOpen}
 		{jobId}
-		filename={downloadFilename}
+		filename={paidDownloadName}
 		ondownload={runPaidDownload}
 		onfreeDownload={runFreeMapSvgDownload}
 	/>

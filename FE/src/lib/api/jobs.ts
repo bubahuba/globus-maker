@@ -54,8 +54,9 @@ export async function getJob(jobId: string): Promise<JobResponse> {
 	return parseJson<JobResponse>(response);
 }
 
-export function downloadUrl(jobId: string): string {
-	return `/api/jobs/${jobId}/download`;
+export function downloadUrl(jobId: string, format: 'zip' | 'pdf' = 'zip'): string {
+	if (format === 'zip') return `/api/jobs/${jobId}/download`;
+	return `/api/jobs/${jobId}/download?format=${encodeURIComponent(format)}`;
 }
 
 async function triggerBrowserDownload(blob: Blob, filename: string): Promise<void> {
@@ -69,14 +70,49 @@ async function triggerBrowserDownload(blob: Blob, filename: string): Promise<voi
 	URL.revokeObjectURL(objectUrl);
 }
 
-/** Fetch zip, trigger browser save, then resolve (server purges artifacts after download). */
-export async function downloadJobZip(jobId: string, filename?: string | null): Promise<void> {
-	const response = await fetch(downloadUrl(jobId));
+/** Prefer Content-Disposition filename from the download response. */
+function filenameFromContentDisposition(header: string | null): string | null {
+	if (!header) return null;
+	const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+	if (utf8?.[1]) {
+		try {
+			return decodeURIComponent(utf8[1].trim());
+		} catch {
+			return utf8[1].trim();
+		}
+	}
+	const quoted = /filename="([^"]+)"/i.exec(header);
+	if (quoted?.[1]) return quoted[1].trim();
+	const plain = /filename=([^;]+)/i.exec(header);
+	return plain?.[1]?.trim().replace(/^["']|["']$/g, '') || null;
+}
+
+/** Fetch zip/pdf, trigger browser save, then resolve (server purges artifacts after download). */
+export async function downloadJobZip(
+	jobId: string,
+	filename?: string | null,
+	format: 'zip' | 'pdf' = 'zip'
+): Promise<void> {
+	const response = await fetch(downloadUrl(jobId, format));
 	if (!response.ok) {
 		const body = (await response.json().catch(() => null)) as { error?: string } | null;
 		throw new Error(body?.error || `Download failed (${response.status})`);
 	}
-	await triggerBrowserDownload(await response.blob(), filename?.trim() || 'globus-stripes.zip');
+	const fromHeader = filenameFromContentDisposition(response.headers.get('Content-Disposition'));
+	const fallback = format === 'pdf' ? 'globus-stripes.pdf' : 'globus-stripes.zip';
+	const saveAs = fromHeader || filename?.trim() || fallback;
+	await triggerBrowserDownload(await response.blob(), saveAs);
+}
+
+/** Swap `.zip` ↔ `.pdf` on a server-provided download basename. */
+export function withDownloadExtension(
+	filename: string | null | undefined,
+	format: 'zip' | 'pdf'
+): string | null {
+	const name = filename?.trim();
+	if (!name) return null;
+	const base = name.replace(/\.(zip|pdf)$/i, '');
+	return `${base}.${format}`;
 }
 
 /** Map SVG filename derived from a globe zip name (`place-25cm.zip` → `place.svg`). */

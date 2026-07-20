@@ -241,7 +241,7 @@
 			<h2 class="text-lg font-medium text-stone-900">Generated files</h2>
 			<p class="text-sm text-stone-500">
 				{#if !artifactsAvailable && status === 'complete'}
-					Server copies were removed after download to free disk space. Your zip is on your
+					Server copies were removed after download to free disk space. Your download is on your
 					device.
 				{:else}
 					{previewHelperText}

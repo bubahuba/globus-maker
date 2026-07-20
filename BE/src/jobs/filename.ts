@@ -11,17 +11,31 @@ function placeSlug(placeName: string | undefined): string {
   );
 }
 
+export type GlobeDownloadFormat = "zip" | "pdf";
+
+function globeSizeLabel(diameterCm: number): string {
+  const cm = Number.isFinite(diameterCm) ? Math.round(diameterCm * 10) / 10 : 0;
+  return Number.isInteger(cm) ? String(cm) : cm.toFixed(1);
+}
+
 /** Globe download: `{place}-{diameterCm}cm.zip` (one decimal when needed). */
 export function stripeZipFilename(placeName: string | undefined, diameterCm: number): string {
-  const cm = Number.isFinite(diameterCm) ? Math.round(diameterCm * 10) / 10 : 0;
-  const label = Number.isInteger(cm) ? String(cm) : cm.toFixed(1);
-  return `${placeSlug(placeName)}-${label}cm.zip`;
+  return `${placeSlug(placeName)}-${globeSizeLabel(diameterCm)}cm.zip`;
+}
+
+/** Globe PDF: `{place}-{diameterCm}cm.pdf`. */
+export function stripePdfFilename(placeName: string | undefined, diameterCm: number): string {
+  return `${placeSlug(placeName)}-${globeSizeLabel(diameterCm)}cm.pdf`;
 }
 
 /** Map download: `{place}-{side}px.zip`. */
 export function mapZipFilename(placeName: string | undefined, squareSidePx: number): string {
   const px = Number.isFinite(squareSidePx) ? Math.round(squareSidePx) : 0;
   return `${placeSlug(placeName)}-${px}px.zip`;
+}
+
+export function normalizeGlobeDownloadFormat(raw: unknown): GlobeDownloadFormat {
+  return raw === "pdf" ? "pdf" : "zip";
 }
 
 export function jobZipFilename(request: {
@@ -32,6 +46,24 @@ export function jobZipFilename(request: {
 }): string {
   if (request.mode === "map") {
     return mapZipFilename(request.placeName, Number(request.squareSidePx) || 0);
+  }
+  return stripeZipFilename(request.placeName, Number(request.diameterCm) || 0);
+}
+
+export function jobDownloadFilename(
+  request: {
+    mode?: string;
+    placeName?: string;
+    diameterCm?: number;
+    squareSidePx?: number;
+  },
+  format: GlobeDownloadFormat = "zip",
+): string {
+  if (request.mode === "map") {
+    return mapZipFilename(request.placeName, Number(request.squareSidePx) || 0);
+  }
+  if (format === "pdf") {
+    return stripePdfFilename(request.placeName, Number(request.diameterCm) || 0);
   }
   return stripeZipFilename(request.placeName, Number(request.diameterCm) || 0);
 }

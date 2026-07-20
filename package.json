@@ -13,18 +13,20 @@
     "deploy": "npm run build && npx wrangler deploy",
     "deploy:worker": "npm run build && npx wrangler deploy --containers-rollout=none",
     "test": "npm run test:be",
-    "test:be": "npx tsx BE/tests/tile-math.test.ts && npx tsx BE/tests/map-style.test.ts",
+    "test:be": "npx tsx BE/tests/tile-math.test.ts && npx tsx BE/tests/map-style.test.ts && npx tsx BE/tests/globe-pdf.test.ts",
     "typecheck": "tsc --noEmit -p BE/tsconfig.json"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.0.28",
     "@hono/node-server": "^1.19.14",
+    "fflate": "^0.8.3",
     "hono": "^4.12.27",
+    "pdf-lib": "^1.17.1",
     "wrangler": "^4.26.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260708.1",
-    "@types/node": "^24.0.10",
+    "@types/node": "^24.13.3",
     "tsx": "^4.20.3",
     "typescript": "^6.0.3"
   }

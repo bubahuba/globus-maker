@@ -38,8 +38,10 @@ PRINT_PX_PER_CM = 160.0
 PRINT_DPI = PRINT_PX_PER_CM * 2.54
 # Physical circular cover cut diameter glued over converging stripe tips.
 POLE_CAP_DIAMETER_CM = 5.0
-# Cap imagery is slightly larger than the 1:1 prewarp→stripe match for glue overlap.
-POLE_CAP_ENLARGE = 1.06
+# Shrink the source disk so printed cap detail matches stripe-tip letter size.
+# Radial unwrap alone (~1.06 glue overlap) under-scales: nona TM near the pole
+# magnifies centre detail vs an isotropic crop of the prewarped map.
+POLE_CAP_ENLARGE = 2.6
 # Printed circular mask extends past the yellow cut circle (bleed beyond the cut line).
 POLE_CAP_MASK_BLEED = 1.04
 # Tiny yellow centre mark on each cap (helps align the cut-out).
@@ -229,8 +231,9 @@ def pole_cap_source_radius_px(
     from the tip corresponds to source radius
     ``r = r_mid * d / (mid_edge_y_frac * globe_diameter_cm)``.
 
-    ``enlarge > 1`` takes a slightly smaller source disk so the printed cap is
-    magnified relative to the prewarped map (easier physical overlap).
+    ``enlarge > 1`` takes a smaller source disk so the printed cap is magnified.
+    Default ``POLE_CAP_ENLARGE`` also compensates nona TM tip magnification so
+    label sizes match the stripe tips (not only radial distance).
     """
     if map_size <= 0 or globe_diameter_cm <= 0 or cap_diameter_cm <= 0:
         raise ValueError("map_size, globe_diameter_cm, and cap_diameter_cm must be positive")
@@ -477,7 +480,7 @@ def build_pole_caps(
     """One JPEG with two equal circles on a white sheet.
 
     Left: north pole — circular crop of the prewarped map centre, print-scaled
-    to the stripe tips (content enlarged via ``enlarge`` for tip glue overlap).
+    to the stripe tips (content enlarged via ``enlarge`` so label size matches).
     Right: south pole — same size, solid ``empty_fill`` only.
 
     Each cap has:

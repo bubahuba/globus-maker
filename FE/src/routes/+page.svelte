@@ -12,6 +12,7 @@
 	import type {
 		CreateJobResponse,
 		EstimateResponse,
+		GlobeDownloadFormat,
 		JobMode,
 		JobRequest,
 		JobResponse,
@@ -70,6 +71,8 @@
 	let stripes = $state(12);
 	let diameterCm = $state(25);
 	let outputFormat = $state<OutputFormat>('jpg');
+	/** Globe paid download: zip of files or single-page PDF contact sheet. */
+	let globeDownloadFormat = $state<GlobeDownloadFormat>('zip');
 	let mapLayers = $state(loadMapLayers());
 	let downloadFilename = $state<string | null>(null);
 
@@ -450,6 +453,7 @@
 						queuePosition={jobQueuePosition}
 						queueLength={jobQueueLength}
 						{downloadFilename}
+						{globeDownloadFormat}
 						{artifactsAvailable}
 						paid={jobPaid}
 						onpaid={() => {
@@ -618,6 +622,44 @@
 							π × diameter — informational; editing updates diameter
 						</span>
 					</label>
+
+					<fieldset class="mb-4 space-y-2">
+						<legend class="text-sm text-stone-600">Download format</legend>
+						<div class="grid grid-cols-2 gap-2">
+							<label class="cursor-pointer">
+								<input
+									type="radio"
+									name="globeDownloadFormat"
+									value="zip"
+									bind:group={globeDownloadFormat}
+									class="peer sr-only"
+								/>
+								<span
+									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								>
+									ZIP
+								</span>
+							</label>
+							<label class="cursor-pointer">
+								<input
+									type="radio"
+									name="globeDownloadFormat"
+									value="pdf"
+									bind:group={globeDownloadFormat}
+									class="peer sr-only"
+								/>
+								<span
+									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								>
+									PDF
+								</span>
+							</label>
+						</div>
+						<span class="block text-xs text-stone-400">
+							ZIP: separate stripe JPEGs + pole caps. PDF: one page — stripes side by side,
+							then pole caps (rotated to save space).
+						</span>
+					</fieldset>
 				{/if}
 
 				<button

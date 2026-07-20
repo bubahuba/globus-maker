@@ -65,6 +65,8 @@ def test_enlarge_shrinks_source_disk() -> None:
     )
     assert enlarged < exact
     assert abs(exact / enlarged - POLE_CAP_ENLARGE) < 1e-9
+    # Default enlarge compensates nona TM tip magnification vs isotropic crop.
+    assert POLE_CAP_ENLARGE >= 2.0
 
 
 def test_source_radius_clamped_to_half_map() -> None:

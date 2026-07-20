@@ -32,7 +32,12 @@ import {
   purgeJobArtifactsIfExpired,
   putArtifact,
 } from "./jobs/artifacts";
-import { jobZipFilename } from "./jobs/filename";
+import {
+  jobDownloadFilename,
+  jobZipFilename,
+  normalizeGlobeDownloadFormat,
+} from "./jobs/filename";
+import { buildGlobeStripesPdf } from "./jobs/globe-pdf";
 import { captureGlobeDownloadOrder, createGlobeDownloadOrder } from "./paypal/client";
 import { publicPaypalConfig } from "./paypal/config";
 
@@ -317,6 +322,7 @@ app.get("/api/jobs/:id", async (c) => {
   const hasArtifacts = job.artifactsAvailable !== false;
   const mode = normalizeJobMode(job.request.mode);
   const zipReady = canDownloadZip(job);
+  // Default listing uses zip name; FE swaps .pdf when that format is selected.
   const downloadFilename = jobZipFilename({ ...job.request, mode });
 
   return c.json({
@@ -337,7 +343,10 @@ app.get("/api/jobs/:id", async (c) => {
     paid: job.paid === true,
     updatedAt: job.updatedAt,
     downloadUrl: zipReady ? `/api/jobs/${job.id}/download` : null,
-    downloadFilename: zipReady ? downloadFilename : null,
+    // Filename is always available once complete (not gated on paid) so the UI can show
+    // place + size before checkout; only downloadUrl requires payment for globe.
+    downloadFilename:
+      job.status === "complete" && hasArtifacts ? downloadFilename : null,
     placeName: job.request.placeName,
     center: job.request.center,
     sideMeters: job.request.sideMeters,
@@ -428,8 +437,12 @@ app.get("/api/jobs/:id/download", async (c) => {
   job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
 
   const mode = normalizeJobMode(job.request.mode);
+  const format = normalizeGlobeDownloadFormat(c.req.query("format"));
+  if (mode === "map" && format === "pdf") {
+    return c.json({ error: "PDF download is only available for globe jobs" }, 400);
+  }
   if (mode === "globe" && job.paid !== true) {
-    return c.json({ error: "Payment required for globe zip download" }, 402);
+    return c.json({ error: "Payment required for globe download" }, 402);
   }
   if (job.status !== "complete") {
     return c.json({ error: "Job not complete" }, 409);
@@ -447,26 +460,39 @@ app.get("/api/jobs/:id/download", async (c) => {
     return c.json({ error: "Artifact missing" }, 404);
   }
 
-  const filename = jobZipFilename({ ...job.request, mode });
+  const filename = jobDownloadFilename({ ...job.request, mode }, format);
   const headers = new Headers();
-  headers.set("Content-Type", "application/zip");
-  headers.set("Content-Disposition", `attachment; filename="${filename}"`);
   // Client can refresh job status; server deletes zip + previews after the body is buffered.
   headers.set("X-Artifacts-Purged", "1");
+  headers.set("Content-Disposition", `attachment; filename="${filename}"`);
+
+  let body: ArrayBuffer | Uint8Array = zipBytes;
+  if (format === "pdf") {
+    try {
+      body = await buildGlobeStripesPdf(zipBytes);
+      headers.set("Content-Type", "application/pdf");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "PDF build failed";
+      console.error("[download] pdf:", message);
+      return c.json({ error: message }, 500);
+    }
+  } else {
+    headers.set("Content-Type", "application/zip");
+  }
 
   const artifacts = c.env.ARTIFACTS;
   const jobId = job.id;
   c.executionCtx.waitUntil(
     (async () => {
       await purgeJobArtifacts(artifacts, jobId);
-      // One-time unlock: stripe zip download clears paid so the URL cannot be reused.
+      // One-time unlock: paid download clears paid so the URL cannot be reused.
       if (mode === "globe") {
         await markJobUnpaid(artifacts, jobId);
       }
     })(),
   );
 
-  return new Response(zipBytes, { headers });
+  return new Response(body, { headers });
 });
 
 app.get("/api/paypal/config", (c) => {

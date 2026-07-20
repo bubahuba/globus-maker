@@ -38,7 +38,7 @@ description: Understand and modify the Globus Maker job pipeline from map select
 2. **Map** — optional SVG→JPEG; **packaging** zip (`input.svg`/`input.jpg`); done
 3. **Globe** — DePolar sphere from `input.svg` → `input-distorted-preview.jpg` (keeps Base land fill on the map; Empty fill only for DePolar gaps)
 4. **Globe** — BarrelInverse prewarp → internal `input-distorted.svg` + raster `input-distorted.jpg` (SVG not uploaded/zipped)
-5. **Globe** — Pole caps sheet → `pole-caps.jpg` (north map + empty-fill south; yellow cut circle + centre mark; mask bleeds past cut line)
+5. **Globe** — Pole caps sheet → `pole-caps.jpg` (north map + empty-fill south; 5 cm cut diameter; content enlarge ~2.6× so tip labels match stripes; yellow cut circle + centre mark; mask bleeds past cut line)
 6. **projecting** — `slize.pl` → `out-*.jpg`, yellow lens cut-line + print density (160 px/cm / ~406.4 DPI); UI preview upload is height-capped (500px), disk/zip keep full size
 7. **packaging** — zip `input.svg` + `pole-caps.jpg` + full-size stripe JPGs
 8. API stores zip in R2, marks **complete**

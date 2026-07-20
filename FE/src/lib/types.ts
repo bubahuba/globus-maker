@@ -31,6 +31,9 @@ export type JobMode = 'map' | 'globe';
 /** Artifact format for the square map (Map mode) or forced jpg for Globe stripes. */
 export type OutputFormat = 'jpg' | 'svg';
 
+/** Globe paid download packaging: zip of files, or single-page PDF contact sheet. */
+export type GlobeDownloadFormat = 'zip' | 'pdf';
+
 export interface JobRequest {
 	center: LatLng;
 	sideMeters: number;
