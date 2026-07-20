@@ -860,12 +860,7 @@
 			</div>
 
 			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
-				<MapLayerControls bind:value={mapLayers} />
-				{#if uploadedMapUrl}
-					<p class="mt-3 text-xs text-stone-400">
-						With an uploaded map, only Empty fill affects stripe gaps.
-					</p>
-				{/if}
+				<MapLayerControls bind:value={mapLayers} emptyFillOnly={!!uploadedMapUrl} />
 			</div>
 		</aside>
 	</div>
