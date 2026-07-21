@@ -7,6 +7,7 @@
 		loadPaypalSdk,
 		type PaypalPublicConfig
 	} from '@lib/paypal';
+	import { globeDownloadPriceEuro } from '@shared/globe-pricing';
 
 	interface Props {
 		open?: boolean;
@@ -42,8 +43,24 @@
 	const titleId = 'paypal-checkout-dialog-title';
 	const descId = 'paypal-checkout-dialog-desc';
 
+	/** Client preview from diameter; prefer server amount once config loads. */
+	const previewAmount = $derived(
+		config?.amount ??
+			(diameterCm != null && Number.isFinite(diameterCm)
+				? globeDownloadPriceEuro(diameterCm)
+				: null)
+	);
+
+	const amountCurrency = $derived(config?.currency ?? 'EUR');
+
 	const amountLabel = $derived(
-		config ? formatPaypalAmountLabel(config.amount, config.currency) : '…'
+		previewAmount ? formatPaypalAmountLabel(previewAmount, amountCurrency) : '…'
+	);
+
+	const diameterLabel = $derived(
+		diameterCm != null && Number.isFinite(diameterCm)
+			? `${Number(diameterCm).toFixed(Number(diameterCm) % 1 === 0 ? 0 : 1)} cm`
+			: null
 	);
 
 	const zipLabel = $derived(filename ?? (downloadFormat === 'pdf' ? 'pdf' : 'zip'));
@@ -232,9 +249,8 @@
 					Download globe stripes
 				</h2>
 				<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
-					Globe stripe generation takes more compute than a flat map. Pay
-					{amountLabel} with PayPal to unlock the full download (map + pole caps + stripes).
-					Price scales with diameter (€2 at 20 cm → €6 at 60 cm).
+					Globe stripe generation takes more compute than a flat map. Pay with PayPal to unlock
+					the full download (map + pole caps + stripes).
 					{#if filename}
 						<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
 					{/if}
@@ -242,6 +258,27 @@
 						<span class="mt-1 block text-xs text-amber-800">Sandbox mode — no real charge.</span>
 					{/if}
 				</p>
+
+				<div
+					class="mt-4 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-100"
+					aria-live="polite"
+				>
+					<div class="flex items-baseline justify-between gap-3">
+						<div>
+							<p class="text-xs font-medium tracking-wide text-amber-900/70 uppercase">
+								Price for this globe
+							</p>
+							{#if diameterLabel}
+								<p class="mt-0.5 text-sm text-stone-600">
+									{diameterLabel} diameter · €2–€6 by size
+								</p>
+							{:else}
+								<p class="mt-0.5 text-sm text-stone-600">€2 at 20 cm → €6 at 60 cm</p>
+							{/if}
+						</div>
+						<p class="text-2xl font-semibold tabular-nums text-stone-900">{amountLabel}</p>
+					</div>
+				</div>
 
 				<div class="mt-5 min-h-[48px]">
 					{#if loadError}

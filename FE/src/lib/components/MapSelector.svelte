@@ -3,10 +3,9 @@
 	import {
 		createCenterMarker,
 		createSquareLayer,
-		flyToSelection,
+		fitSelectionInView,
 		initMap,
 		squareBounds,
-		syncMapToTileZoom,
 		updateMapStyle,
 		type MapSelection
 	} from '@lib/map/leaflet';
@@ -15,8 +14,6 @@
 	interface Props {
 		center?: { lat: number; lng: number } | null;
 		sideMeters?: number;
-		/** Job / preview tile zoom — map view locks to this (via Leaflet = tileZoom + 1). */
-		tileZoom?: number | null;
 		mapLayers: MapLayerStyle;
 		onchange?: (selection: MapSelection) => void;
 	}
@@ -24,7 +21,6 @@
 	let {
 		center = null,
 		sideMeters = 2500,
-		tileZoom = null,
 		mapLayers,
 		onchange
 	}: Props = $props();
@@ -34,6 +30,23 @@
 	let baseLayer: ReturnType<typeof initMap>['baseLayer'] | undefined = $state();
 	let square: import('leaflet').Rectangle | undefined;
 	let marker: import('leaflet').Marker | undefined;
+	/** Skip re-fitting while the user drags the center marker. */
+	let draggingMarker = false;
+
+	function selectionCenter(): { lat: number; lng: number } | null {
+		if (marker) {
+			const ll = marker.getLatLng();
+			return { lat: ll.lat, lng: ll.lng };
+		}
+		return center;
+	}
+
+	function frameSelection(animate: boolean) {
+		if (!map || draggingMarker) return;
+		const c = selectionCenter();
+		if (!c) return;
+		fitSelectionInView(map, c, sideMeters, { animate });
+	}
 
 	function setCenterAt(lat: number, lng: number, fly = true) {
 		if (!map) return;
@@ -41,15 +54,23 @@
 		if (!marker) {
 			marker = createCenterMarker({ lat, lng });
 			marker.addTo(map);
+			marker.on('dragstart', () => {
+				draggingMarker = true;
+			});
 			marker.on('drag', () => {
 				updateSquare();
+			});
+			marker.on('dragend', () => {
+				draggingMarker = false;
+				updateSquare();
+				frameSelection(true);
 			});
 		} else {
 			marker.setLatLng([lat, lng]);
 		}
 
-		if (fly) flyToSelection(map, { lat, lng }, tileZoom);
 		updateSquare();
+		frameSelection(fly);
 	}
 
 	function emitChange() {
@@ -92,7 +113,6 @@
 		map = initialized.map;
 		baseLayer = initialized.baseLayer;
 		if (center) setCenterAt(center.lat, center.lng, false);
-		if (tileZoom != null) syncMapToTileZoom(map, tileZoom);
 
 		map.on('click', (event) => {
 			setCenterAt(event.latlng.lat, event.latlng.lng);
@@ -101,6 +121,7 @@
 		const resizeMap = () => {
 			map?.invalidateSize();
 			baseLayer?.getMaplibreMap().resize();
+			frameSelection(false);
 		};
 		requestAnimationFrame(resizeMap);
 
@@ -116,11 +137,8 @@
 	$effect(() => {
 		sideMeters;
 		updateSquare();
-	});
-
-	$effect(() => {
-		if (!map || tileZoom == null || !Number.isFinite(tileZoom)) return;
-		syncMapToTileZoom(map, tileZoom);
+		// Instant fit so the range slider feels live while dragging.
+		frameSelection(false);
 	});
 
 	$effect(() => {

@@ -509,7 +509,7 @@
 	</header>
 
 	<div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-		<div class="sticky top-4 self-start">
+		<div class="sticky top-20 self-start">
 			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
 				{#if !uploadedMapUrl}
 					<PlaceSearch onselect={onPlaceSelect} />
@@ -527,7 +527,6 @@
 						<MapSelector
 							{center}
 							{sideMeters}
-							tileZoom={estimate ? clampTileZoom(estimate.zoom) : null}
 							{mapLayers}
 							onchange={onSelectionChange}
 						/>

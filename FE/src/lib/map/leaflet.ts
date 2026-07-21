@@ -4,22 +4,12 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png?url';
 import markerIcon from 'leaflet/dist/images/marker-icon.png?url';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png?url';
 import { buildMapStyle, type MapLayerStyle } from '@shared/map-style';
-import { clampTileZoom } from '@shared/tile-constants';
 import { SELECTION_ZOOM, WORLD_VIEW, WORLD_ZOOM } from './constants';
 import { attachPlaceOverzoom } from './place-overzoom';
 
 export interface MapSelection {
 	center: { lat: number; lng: number };
 	sideMeters: number;
-}
-
-/**
- * maplibre-gl-leaflet sets MapLibre zoom = LeafletZoom − 1.
- * Use LeafletZoom = tileZoom + 1 so the preview loads the same MVT zoom
- * as the job estimate shown in the Preview card.
- */
-export function leafletZoomForTileZoom(tileZoom: number): number {
-	return clampTileZoom(tileZoom) + 1;
 }
 
 const METERS_PER_DEG_LAT = 111_320;
@@ -55,7 +45,7 @@ export function initMap(
 	zoom = center ? SELECTION_ZOOM : WORLD_ZOOM
 ): { map: L.Map; baseLayer: MaplibreGlLayer } {
 	const view = center ?? WORLD_VIEW;
-	// Zoom is driven only by the area-size slider → estimate tile zoom.
+	// Zoom is driven by fitting the selection square (side-meters slider / place pick).
 	const map = L.map(container, {
 		zoomControl: false,
 		scrollWheelZoom: false,
@@ -111,21 +101,22 @@ export function createCenterMarker(center: { lat: number; lng: number }): L.Mark
 	return L.marker([center.lat, center.lng], { draggable: true });
 }
 
-export function flyToSelection(
+/**
+ * Center and zoom so the selection square fills the map view.
+ * Used when the side-meters slider (or a new place) changes the region size.
+ */
+export function fitSelectionInView(
 	map: L.Map,
 	center: { lat: number; lng: number },
-	tileZoom?: number | null
+	sideMeters: number,
+	options?: { animate?: boolean }
 ): void {
-	const zoom =
-		tileZoom != null && Number.isFinite(tileZoom)
-			? leafletZoomForTileZoom(tileZoom)
-			: map.getZoom();
-	map.flyTo([center.lat, center.lng], zoom);
-}
-
-/** Snap Leaflet zoom so MapLibre matches the estimate tile zoom. */
-export function syncMapToTileZoom(map: L.Map, tileZoom: number): void {
-	const zoom = leafletZoomForTileZoom(tileZoom);
-	if (Math.abs(map.getZoom() - zoom) < 0.01) return;
-	map.setZoom(zoom);
+	const bounds = squareBounds(center, sideMeters);
+	const padding: [number, number] = [36, 36];
+	const maxZoom = 18;
+	if (options?.animate === false) {
+		map.fitBounds(bounds, { padding, maxZoom, animate: false });
+		return;
+	}
+	map.flyToBounds(bounds, { padding, maxZoom, duration: 0.45 });
 }
