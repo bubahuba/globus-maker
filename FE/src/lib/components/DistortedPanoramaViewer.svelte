@@ -10,7 +10,7 @@
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
 		src: string;
 		title?: string;
-		/** Three.js scene + container background (Empty fill hex). */
+		/** Empty fill hex — drives the soft gradient behind the sphere. */
 		backgroundColor?: string;
 	}
 
@@ -26,9 +26,11 @@
 	/** Path only — ignore ?v= cache-bust so stripe uploads don't remount the globe. */
 	const loadKey = $derived(src.split('?')[0] || src);
 
+	/** Radial wash around Empty fill so the globe rim stays readable on matching fills. */
+	const backgroundGradient = $derived(gradientFromBase(backgroundColor));
+
 	let loadedKey = '';
 	let renderer: THREE.WebGLRenderer | null = null;
-	let scene: THREE.Scene | null = null;
 	let animationId = 0;
 	let resizeObserver: ResizeObserver | null = null;
 	let sceneResources: {
@@ -38,6 +40,32 @@
 		controls: OrbitControls;
 		globe: THREE.Object3D;
 	} | null = null;
+
+	function parseHex(hex: string): { r: number; g: number; b: number } | null {
+		const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+		if (!m) return null;
+		const n = parseInt(m[1], 16);
+		return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+	}
+
+	function mixChannel(ch: number, toward: number, amount: number): number {
+		return Math.round(ch + (toward - ch) * amount);
+	}
+
+	function mixHex(hex: string, toward: number, amount: number): string {
+		const c = parseHex(hex);
+		if (!c) return hex;
+		const r = mixChannel(c.r, toward, amount);
+		const g = mixChannel(c.g, toward, amount);
+		const b = mixChannel(c.b, toward, amount);
+		return `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
+	}
+
+	function gradientFromBase(base: string): string {
+		const dark = mixHex(base, 0, 0.32);
+		const light = mixHex(base, 255, 0.16);
+		return `radial-gradient(ellipse 125% 110% at 50% 38%, ${dark} 0%, ${base} 48%, ${light} 100%)`;
+	}
 
 	function disposeViewer() {
 		if (animationId) {
@@ -53,7 +81,6 @@
 			sceneResources.texture.dispose();
 			sceneResources = null;
 		}
-		scene = null;
 		if (renderer) {
 			renderer.dispose();
 			renderer.domElement.remove();
@@ -96,15 +123,16 @@
 		const texture = await loadTexture(url);
 
 		const nextScene = new THREE.Scene();
-		nextScene.background = new THREE.Color(backgroundColor);
-		scene = nextScene;
+		// Transparent clear — CSS gradient on the host provides depth/contrast.
+		nextScene.background = null;
 
 		const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
 		camera.position.set(0, 0.35, 2.6);
 
-		const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+		const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 		webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 		webgl.outputColorSpace = THREE.SRGBColorSpace;
+		webgl.setClearColor(0x000000, 0);
 		el.appendChild(webgl.domElement);
 		renderer = webgl;
 
@@ -173,14 +201,6 @@
 		};
 	});
 
-	/** Update scene clear color without remounting / reloading the texture. */
-	$effect(() => {
-		const color = backgroundColor;
-		if (scene) {
-			scene.background = new THREE.Color(color);
-		}
-	});
-
 	onDestroy(() => {
 		disposeViewer();
 		loadedKey = '';
@@ -192,13 +212,13 @@
 		<div
 			bind:this={container}
 			class="h-full w-full overflow-hidden rounded-lg ring-1 ring-stone-200"
-			style:background-color={backgroundColor}
+			style:background={backgroundGradient}
 			aria-label={title}
 		></div>
 		{#if statusMessage}
 			<p
 				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg px-4 text-center text-sm text-amber-800 ring-1 ring-stone-200"
-				style:background-color={backgroundColor}
+				style:background={backgroundGradient}
 			>
 				{statusMessage}
 			</p>
