@@ -3,7 +3,7 @@
 
 	const links = [
 		{ href: '/', label: 'Globus Maker App' },
-		{ href: '/about', label: 'About' }
+		{ href: '/about', label: 'About this app' }
 	] as const;
 
 	let menuOpen = $state(false);
