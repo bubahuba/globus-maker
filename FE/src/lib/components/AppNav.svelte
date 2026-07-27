@@ -26,10 +26,18 @@
 	<div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
 		<a
 			href="/"
-			class="text-sm font-semibold tracking-wide text-stone-900 transition hover:text-amber-800"
+			class="inline-flex items-center gap-2.5 text-sm font-semibold tracking-wide text-stone-900 transition hover:text-amber-800"
 			onclick={closeMenu}
 		>
-			Globus Maker
+			<img
+				src="/icon-192.png"
+				alt=""
+				width="32"
+				height="32"
+				class="h-8 w-8 rounded-lg shadow-sm ring-1 ring-stone-200/80"
+				decoding="async"
+			/>
+			<span>Globus Maker</span>
 		</a>
 
 		<nav class="hidden items-center gap-1 sm:flex" aria-label="Main">

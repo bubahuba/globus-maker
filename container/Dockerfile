@@ -29,7 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+# --ignore-installed: Debian ships typing_extensions without a pip RECORD; plain
+# install tries to uninstall it and fails (uninstall-no-record-file).
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt
 
 COPY slize.pl process.py stitch.py tile_render.py distort.py svg_map.py svg_warp.py job_queue.py server.py ./
 RUN chmod +x /app/slize.pl

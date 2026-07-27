@@ -498,6 +498,13 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Globus Maker</title>
+	<meta
+		name="description"
+		content="Make a square city map or globe meridian stripes from any place on OpenStreetMap or upload own map."
+	/>
+</svelte:head>
 <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8">
 	<header class="space-y-2">
 		<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Globus Maker</p>
@@ -509,7 +516,7 @@
 	</header>
 
 	<div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-		<div class="sticky top-20 self-start">
+		<div class="lg:sticky lg:top-20 lg:self-start">
 			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
 				{#if !uploadedMapUrl}
 					<PlaceSearch onselect={onPlaceSelect} />

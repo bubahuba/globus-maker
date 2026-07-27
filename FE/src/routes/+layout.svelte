@@ -7,6 +7,10 @@
 	let { children } = $props();
 </script>
 
+<svelte:head>
+	<title>Globus Maker</title>
+</svelte:head>
+
 <div class="min-h-screen">
 	<AppNav />
 	{@render children()}
