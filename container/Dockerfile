@@ -33,7 +33,7 @@ COPY requirements.txt .
 # install tries to uninstall it and fails (uninstall-no-record-file).
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt
 
-COPY slize.pl process.py stitch.py tile_render.py distort.py svg_map.py svg_warp.py job_queue.py server.py ./
+COPY slize.pl process.py stitch.py tile_render.py distort.py svg_map.py svg_warp.py job_queue.py server.py globe_readme.py ./
 RUN chmod +x /app/slize.pl
 
 ENV PORT=8080

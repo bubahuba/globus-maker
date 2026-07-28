@@ -9,6 +9,7 @@
 		updateMapStyle,
 		type MapSelection
 	} from '@lib/map/leaflet';
+	import { adjustSideMetersFromWheel } from '@lib/map/selection-size';
 	import { MAP_LAYER_KEYS, type MapLayerStyle } from '@shared/map-style';
 
 	interface Props {
@@ -20,7 +21,7 @@
 
 	let {
 		center = null,
-		sideMeters = 2500,
+		sideMeters = $bindable(2500),
 		mapLayers,
 		onchange
 	}: Props = $props();
@@ -108,8 +109,9 @@
 
 	onMount(() => {
 		if (!mapEl) return;
+		const el = mapEl;
 
-		const initialized = initMap(mapEl, center, mapLayers);
+		const initialized = initMap(el, center, mapLayers);
 		map = initialized.map;
 		baseLayer = initialized.baseLayer;
 		if (center) setCenterAt(center.lat, center.lng, false);
@@ -117,6 +119,16 @@
 		map.on('click', (event) => {
 			setCenterAt(event.latlng.lat, event.latlng.lng);
 		});
+
+		const onWheel = (event: WheelEvent) => {
+			event.preventDefault();
+			const next = adjustSideMetersFromWheel(sideMeters, event.deltaY);
+			if (next === sideMeters) return;
+			sideMeters = next;
+			updateSquare();
+			frameSelection(false);
+		};
+		el.addEventListener('wheel', onWheel, { passive: false });
 
 		const resizeMap = () => {
 			map?.invalidateSize();
@@ -126,9 +138,10 @@
 		requestAnimationFrame(resizeMap);
 
 		const ro = new ResizeObserver(() => resizeMap());
-		ro.observe(mapEl);
+		ro.observe(el);
 
 		return () => {
+			el.removeEventListener('wheel', onWheel);
 			ro.disconnect();
 			map?.remove();
 		};

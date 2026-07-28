@@ -17,6 +17,7 @@ services:
       - ./container/svg_map.py:/app/svg_map.py:ro
       - ./container/tile_render.py:/app/tile_render.py:ro
       - ./container/process.py:/app/process.py:ro
+      - ./container/globe_readme.py:/app/globe_readme.py:ro
       - ./container/distort.py:/app/distort.py:ro
       - ./container/svg_warp.py:/app/svg_warp.py:ro
       - ./container/stitch.py:/app/stitch.py:ro

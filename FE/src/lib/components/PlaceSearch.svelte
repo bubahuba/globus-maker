@@ -2,10 +2,11 @@
 	import { searchPlaces, type GeocodeResult } from '@lib/api/geocode';
 
 	interface Props {
+		value?: string | null;
 		onselect?: (result: GeocodeResult) => void;
 	}
 
-	let { onselect }: Props = $props();
+	let { value = null, onselect }: Props = $props();
 
 	let query = $state('');
 	let results = $state<GeocodeResult[]>([]);
@@ -14,6 +15,13 @@
 	let open = $state(false);
 
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		const next = value?.trim() ?? '';
+		if (next && next !== query) {
+			query = next;
+		}
+	});
 
 	async function runSearch(value: string) {
 		searching = true;

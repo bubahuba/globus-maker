@@ -379,6 +379,7 @@ app.post("/api/jobs", async (c) => {
   const placeName =
     typeof body.placeName === "string" ? body.placeName.trim().slice(0, 120) || undefined : undefined;
   request.placeName = placeName;
+  request.mapLayers = validateMapLayers(body.mapLayers);
 
   let manifest: TileManifest;
   try {
@@ -498,6 +499,7 @@ app.get("/api/jobs/:id", async (c) => {
     stripes: job.request.stripes,
     diameterCm: job.request.diameterCm,
     outputFormat: job.request.outputFormat === "svg" ? "svg" : "jpg",
+    mapLayers: validateMapLayers(job.request.mapLayers),
   });
 });
 

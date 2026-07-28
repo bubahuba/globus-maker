@@ -1,5 +1,6 @@
 """Pole caps sheet: north map circle + empty-fill circle on white."""
 
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -52,7 +53,8 @@ def test_source_radius_matches_stripe_tip() -> None:
         enlarge=1.0,
     )
     r_mid = map_size / 2.0
-    d_cm = (src_r / r_mid) * NONA_MID_EDGE_Y_FRAC * globe_diameter_cm
+    stripe_length_cm = math.pi * globe_diameter_cm / 2.0
+    d_cm = (src_r / r_mid) * NONA_MID_EDGE_Y_FRAC * stripe_length_cm
     assert abs(d_cm - cap_diameter_cm / 2.0) < 1e-9
 
 

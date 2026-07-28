@@ -1,7 +1,7 @@
 import { degrees, PDFDocument, type PDFImage, type PDFPage } from "pdf-lib";
 import { unzipSync } from "fflate";
 
-/** Matches processor print density (diameterCm × 160). */
+/** Matches processor print density (pole-to-pole cm × 160 px/cm). */
 const PRINT_PX_PER_CM = 160;
 const PT_PER_IN = 72;
 const CM_PER_IN = 2.54;

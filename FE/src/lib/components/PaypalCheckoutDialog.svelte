@@ -39,6 +39,8 @@
 	let loadError = $state<string | null>(null);
 	let payError = $state<string | null>(null);
 	let busy = $state<'sdk' | 'pay' | 'paid' | 'free' | null>(null);
+	let shareCopied = $state(false);
+	let shareCopyTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const titleId = 'paypal-checkout-dialog-title';
 	const descId = 'paypal-checkout-dialog-desc';
@@ -82,6 +84,21 @@
 			payError = err instanceof Error ? err.message : 'Download failed';
 		} finally {
 			busy = null;
+		}
+	}
+
+	async function shareJobUrl() {
+		if (busy) return;
+		payError = null;
+		try {
+			await navigator.clipboard.writeText(window.location.href);
+			shareCopied = true;
+			clearTimeout(shareCopyTimer);
+			shareCopyTimer = setTimeout(() => {
+				shareCopied = false;
+			}, 2000);
+		} catch {
+			payError = 'Could not copy link to clipboard';
 		}
 	}
 
@@ -249,8 +266,8 @@
 					Download globe stripes
 				</h2>
 				<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
-					Globe stripe generation takes more compute than a flat map. Pay with PayPal to unlock
-					the full download (map + pole caps + stripes).
+					Making globe strips takes a bit more work than a flat map. Pay once to download
+					everything — the square map, pole caps, printable strips, and a short README.
 					{#if filename}
 						<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
 					{/if}
@@ -302,9 +319,18 @@
 
 				<button
 					type="button"
+					onclick={shareJobUrl}
+					disabled={busy != null}
+					class="mt-4 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-amber-800 hover:bg-amber-50 hover:text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					{shareCopied ? 'Link copied!' : 'Share job url'}
+				</button>
+
+				<button
+					type="button"
 					onclick={confirmFreeDownload}
 					disabled={busy != null}
-					class="mt-4 w-full rounded-lg px-3 py-2 text-sm text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+					class="mt-3 w-full rounded-lg px-3 py-2 text-sm text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
 				>
 					{busy === 'free' ? 'Downloading…' : 'Download map SVG without paying'}
 				</button>

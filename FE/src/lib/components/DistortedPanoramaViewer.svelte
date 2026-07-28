@@ -118,7 +118,7 @@
 	async function mountGlobe(el: HTMLDivElement, url: string) {
 		disposeViewer();
 		el.replaceChildren();
-		statusMessage = 'Preparing globe…';
+		statusMessage = 'Loading preview…';
 
 		const texture = await loadTexture(url);
 

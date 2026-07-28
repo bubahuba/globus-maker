@@ -1,5 +1,6 @@
 """Stripe JPEGs carry print density so 100% print matches designed cm size."""
 
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -24,16 +25,24 @@ def test_print_dpi_matches_px_per_cm() -> None:
 
 
 def test_print_size_cm_for_reference_globe() -> None:
-    # 25 cm globe → 4000×720 stripe at 160 px/cm
-    w_cm, h_cm = print_size_cm(720, 4000)
-    assert abs(h_cm - 25.0) < 1e-9
-    assert abs(w_cm - 4.5) < 1e-9
+    # 25 cm globe → pole-to-pole ~39.27 cm → 6283×1131 stripe at 160 px/cm
+    from globe_readme import stripe_height_px
+
+    h = stripe_height_px(25.0)
+    w = round(2 * 0.09 * (12 / 12) * h)
+    w_cm, h_cm = print_size_cm(w, h)
+    assert abs(h_cm - (math.pi * 25 / 2)) < 0.01
+    assert abs(w_cm - w / PRINT_PX_PER_CM) < 1e-9
 
 
 def test_save_print_jpeg_writes_dpi_and_exif_cm() -> None:
+    from globe_readme import stripe_height_px
+
+    h = stripe_height_px(25.0)
+    w = round(2 * 0.09 * (12 / 12) * h)
     with TemporaryDirectory() as tmp:
         path = Path(tmp) / "out-00.jpg"
-        img = Image.new("RGB", (720, 4000), (200, 160, 100))
+        img = Image.new("RGB", (w, h), (200, 160, 100))
         save_print_jpeg(img, path, quality=90)
 
         out = Image.open(path)
@@ -50,11 +59,10 @@ def test_save_print_jpeg_writes_dpi_and_exif_cm() -> None:
         assert abs(float(xres) - PRINT_PX_PER_CM) < 0.05
         assert abs(float(yres) - PRINT_PX_PER_CM) < 0.05
 
-        # Physical size implied by DPI (JFIF may round to integer DPI).
         w_in = out.size[0] / dpi[0]
         h_in = out.size[1] / dpi[1]
-        assert abs(h_in * 2.54 - 25.0) < 0.1
-        assert abs(w_in * 2.54 - 4.5) < 0.1
+        assert abs(h_in * 2.54 - (math.pi * 25 / 2)) < 0.15
+        assert abs(w_in * 2.54 - w / PRINT_PX_PER_CM) < 0.15
 
 
 def test_cut_line_preserves_print_density() -> None:

@@ -17,15 +17,15 @@
 
 	type Manifest = CreateJobResponse['manifest'];
 
-	const statusLabels: Record<JobStatus, string> = {
+	const statusLabels = $derived.by((): Record<JobStatus, string> => ({
 		queued: 'Queued',
-		fetching_tiles: 'Rendering map tiles',
-		stitching: 'Stitching map image',
-		projecting: 'Cutting globe stripes',
-		packaging: 'Packaging download',
+		fetching_tiles: mode === 'globe' ? 'Fetching your map' : 'Rendering map tiles',
+		stitching: mode === 'globe' ? 'Building your map' : 'Stitching map image',
+		projecting: 'Cutting printable strips',
+		packaging: 'Packing your download',
 		complete: 'Complete',
 		failed: 'Failed'
-	};
+	}));
 
 	const stepUnitLabels: Record<StepUnit, string> = {
 		tile: 'tiles',
@@ -163,10 +163,10 @@
 				]
 			: [
 					{ status: 'queued', label: 'Queued' },
-					{ status: 'fetching_tiles', label: 'Tiles' },
-					{ status: 'stitching', label: 'Stitch' },
-					{ status: 'projecting', label: 'Stripes' },
-					{ status: 'packaging', label: 'Package' }
+					{ status: 'fetching_tiles', label: 'Map data' },
+					{ status: 'stitching', label: 'Build map' },
+					{ status: 'projecting', label: 'Strips' },
+					{ status: 'packaging', label: 'Zip up' }
 				]
 	);
 
@@ -207,19 +207,37 @@
 
 			if (stepCurrent < 1) {
 				if (stepUnit === 'tile') {
+					if (mode === 'globe') {
+						return `Downloading map data for your area…`;
+					}
 					const tileCount = Math.floor(stepTotal / 2);
 					return `Preparing ${tileCount.toLocaleString()} vector tiles at zoom ${clampTileZoom(manifest.zoom)}…`;
 				}
 				if (stepUnit === 'row') {
-					return `Combining ${stepTotal} tile ${unit} into one map image…`;
+					return mode === 'globe'
+						? `Putting the map tiles together…`
+						: `Combining ${stepTotal} tile ${unit} into one map image…`;
 				}
 				if (stepUnit === 'stripe') {
-					return `Projecting map into ${stepTotal} meridian ${unit} (${manifest.stripeWidthPx} × ${manifest.stripeHeightPx} px)…`;
+					return mode === 'globe'
+						? `Slicing your map into ${stepTotal} printable strips…`
+						: `Projecting map into ${stepTotal} meridian ${unit} (${manifest.stripeWidthPx} × ${manifest.stripeHeightPx} px)…`;
 				}
 				return `Preparing ${stepTotal} ${unit}…`;
 			}
 
 			if (stepUnit === 'tile' && stepTotal > 1) {
+				if (mode === 'globe') {
+					const tileCount = Math.floor(stepTotal / 2);
+					const half = tileCount;
+					if (stepCurrent <= half) {
+						const pct = Math.min(100, Math.round((stepCurrent / half) * 100));
+						return `Fetched ${stepCurrent.toLocaleString()} of ${half.toLocaleString()} map tiles (${pct}%)`;
+					}
+					const rendered = stepCurrent - half;
+					const pct = Math.min(100, Math.round((rendered / half) * 100));
+					return `Drew ${rendered.toLocaleString()} of ${half.toLocaleString()} map tiles (${pct}%)`;
+				}
 				const tileCount = Math.floor(stepTotal / 2);
 				const half = tileCount;
 				if (stepCurrent <= half) {
@@ -236,15 +254,21 @@
 
 		const fallback: Record<JobStatus, string> = {
 			queued: 'Waiting for the processor to start…',
-			fetching_tiles: `Rendering ${manifest.tileCount.toLocaleString()} vector tiles at zoom ${clampTileZoom(manifest.zoom)}.`,
-			stitching: `Building a ~${manifest.outputSizePx.toLocaleString()} px square map image.`,
-			projecting: `Cutting ${stripeCount} stripes for your globe.`,
+			fetching_tiles:
+				mode === 'globe'
+					? 'Pulling OpenStreetMap data for the area you picked.'
+					: `Rendering ${manifest.tileCount.toLocaleString()} vector tiles at zoom ${clampTileZoom(manifest.zoom)}.`,
+			stitching:
+				mode === 'globe'
+					? 'Drawing your square map — this is the source for the globe strips.'
+					: `Building a ~${manifest.outputSizePx.toLocaleString()} px square map image.`,
+			projecting: `Cutting ${stripeCount} strips you can print and wrap around a globe.`,
 			packaging:
 				mode === 'map'
 					? 'Creating the zip with your map.'
-					: 'Creating the zip with the map, pole caps, and stripe images.',
-			complete: 'Processing finished.',
-			failed: 'Processing stopped before completion.'
+					: 'Zipping the map, pole caps, strips, and a short how-to README.',
+			complete: 'All done — previews are below.',
+			failed: 'Something went wrong before we finished.'
 		};
 		return fallback[status];
 	});

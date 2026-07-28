@@ -2,11 +2,16 @@
 	import { jobFileUrl } from '@lib/api/jobs';
 	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
 	import type { JobMode, JobStatus, OutputFormat } from '@lib/types';
+	import { formatStripePrintSizeCm } from '@shared/tile-constants';
 
 	interface Props {
 		jobId: string | null;
 		files: string[];
 		stripeCount: number;
+		/** Stripe JPEG width in px (globe print size at 160 px/cm). */
+		stripeWidthPx?: number;
+		/** Stripe JPEG height in px (pole-to-pole at 160 px/cm). */
+		stripeHeightPx?: number;
 		status?: JobStatus | null;
 		/** Cache-bust preview URLs when uploads are replaced. */
 		revision?: string | null;
@@ -27,6 +32,8 @@
 		jobId,
 		files,
 		stripeCount,
+		stripeWidthPx = 0,
+		stripeHeightPx = 0,
 		status = null,
 		revision = null,
 		artifactsAvailable = true,
@@ -66,7 +73,7 @@
 					: effectiveMode === 'globe' || outputFormat === 'svg'
 						? 'input.svg'
 						: 'input.jpg';
-		return [{ filename: mapFile, label: 'Stitched map' }] as const;
+		return [{ filename: mapFile, label: effectiveMode === 'globe' ? 'Your square map' : 'Stitched map' }] as const;
 	});
 
 	const readyMaps = $derived.by(() => {
@@ -186,10 +193,12 @@
 		return active ? 'loading-shimmer' : 'loading-placeholder';
 	}
 
+	const stripePrintSizeCm = $derived(formatStripePrintSizeCm(stripeWidthPx, stripeHeightPx));
+
 	const previewHelperText = $derived(
 		effectiveMode === 'map'
-			? 'The square map appears here when stitching finishes.'
-			: 'The stitched map, sphere preview, pole caps, and JPEG stripes appear here as each file finishes processing.'
+			? 'Your map shows up here when it is ready.'
+			: 'Files appear as we go — square map, a globe preview, pole caps, then the printable strips.'
 	);
 
 	/** Per-filename cache-bust frozen when the file first appears; reset on jobId change. */
@@ -238,7 +247,9 @@
 		class="w-full space-y-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"
 	>
 		<div class="space-y-1">
-			<h2 class="text-lg font-medium text-stone-900">Generated files</h2>
+			<h2 class="text-lg font-medium text-stone-900">
+				{effectiveMode === 'globe' ? 'Your globe files' : 'Generated files'}
+			</h2>
 			<p class="text-sm text-stone-500">
 				{#if !artifactsAvailable && status === 'complete'}
 					Server copies were removed after download to free disk space. Your download is on your
@@ -285,10 +296,10 @@
 			{#if effectiveMode === 'globe'}
 				{#if spherePreviewFile && jobId}
 					<div class="space-y-2">
-						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
+						<h3 class="text-base font-medium text-stone-900">Globe preview</h3>
 						<p class="text-sm text-stone-500">
-							Globe from an ImageMagick DePolar unwrap of the stitched map. Map centre is the
-							north pole.
+							A rough idea of how your map wraps around a ball. The place you picked sits at the
+							top.
 						</p>
 						<DistortedPanoramaViewer
 							src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
@@ -297,8 +308,8 @@
 					</div>
 				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 					<div class="space-y-2">
-						<h3 class="text-base font-medium text-stone-900">Sphere preview</h3>
-						<p class="text-sm text-stone-500">Waiting for DePolar texture…</p>
+						<h3 class="text-base font-medium text-stone-900">Globe preview</h3>
+						<p class="text-sm text-stone-500">Building a quick wrap-around preview…</p>
 						<div
 							class="{placeholderClass(activePlaceholder?.kind === 'sphere')} h-[min(40vh,20rem)] w-full rounded-lg ring-1 ring-stone-200"
 							role="status"
@@ -312,10 +323,8 @@
 					<div class="space-y-2">
 						<h3 class="text-base font-medium text-stone-900">Pole caps</h3>
 						<p class="text-sm text-stone-500">
-							Two circles side by side — north (map from the prewarped centre) and south (empty
-							fill only), with white outside the masks. Each has a yellow cut circle at the cap
-							diameter and a small yellow centre mark; the printed mask bleeds slightly past the
-							cut line.
+							Two round pieces for the top and bottom of the globe. Cut along the yellow circle;
+							the small dot marks the centre.
 						</p>
 						{#if poleCapsFile}
 							<img
@@ -339,7 +348,19 @@
 
 				{#if stripeSlots.length > 0}
 					<div class="space-y-3">
-						<h3 class="text-base font-medium text-stone-900">Stripes</h3>
+						<div class="space-y-1">
+							<h3 class="text-base font-medium text-stone-900">Printable strips</h3>
+							{#if stripePrintSizeCm}
+								<p class="text-sm text-stone-600">
+									Each strip is about {stripePrintSizeCm} — the long side runs pole to pole (half
+									the globe's circumference).
+								</p>
+							{/if}
+							<p class="text-sm text-stone-500">
+								Long pieces that wrap around the globe. Line up the wavy yellow edges when you
+								glue neighbours together.
+							</p>
+						</div>
 						<div
 							class="grid w-full gap-2"
 							style:grid-template-columns="repeat({stripeColumns}, minmax(0, 1fr))"

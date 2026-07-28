@@ -30,10 +30,10 @@ const mapManifest = buildTileManifest(kniniceCenter, 2500, { targetOutputPx: 300
 assert(mapManifest.targetOutputPx >= 3000, "map targetOutputPx should honor squareSidePx");
 
 const stripeH = stripeHeightPx(diameterCm);
-assert(stripeH === 4000, `25cm globe should produce 4000px stripes, got ${stripeH}`);
+assert(stripeH === 6283, `25cm globe should produce 6283px stripes, got ${stripeH}`);
 
 const stripeW = stripeWidthPx(stripeH, 12);
-assert(stripeW === 720, `12 stripes at 4000px height should be 720px wide, got ${stripeW}`);
+assert(stripeW === 1131, `12 stripes at 6283px height should be 1131px wide, got ${stripeW}`);
 
 assert(
   resolveTargetOutputPx({ mode: "globe", diameterCm }) === stripeH,

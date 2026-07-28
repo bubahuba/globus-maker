@@ -113,6 +113,7 @@ export interface JobResponse {
 	stripes?: number;
 	diameterCm?: number;
 	outputFormat?: OutputFormat;
+	mapLayers?: MapLayerStyle;
 }
 
 export interface CreateJobResponse {

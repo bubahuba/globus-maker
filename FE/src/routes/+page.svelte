@@ -23,25 +23,18 @@
 		StepUnit
 	} from '@lib/types';
 	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
-	import { getBaseFillColor, getMapCanvasColor } from '@shared/map-style';
-	import { clampTileZoom, MAX_SIDE_METERS } from '@shared/tile-constants';
-
-	const MIN_SIDE_METERS = 500;
+	import {
+		MIN_SIDE_METERS,
+		sideToSlider,
+		sliderToSide
+	} from '@lib/map/selection-size';
+	import { getBaseFillColor, getMapCanvasColor, validateMapLayers } from '@shared/map-style';
+import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx, stripeWidthPx } from '@shared/tile-constants';
 	const MIN_SQUARE_SIDE_PX = 500;
 	const MAX_SQUARE_SIDE_PX = 10000;
 	const DEFAULT_SQUARE_SIDE_PX = 4000;
 	const UPLOAD_ACCEPT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 	const UPLOAD_MAX_BYTES = 40 * 1024 * 1024;
-
-	function sideToSlider(meters: number): number {
-		return (100 * Math.log(meters / MIN_SIDE_METERS)) / Math.log(MAX_SIDE_METERS / MIN_SIDE_METERS);
-	}
-
-	function sliderToSide(position: number): number {
-		return Math.round(
-			MIN_SIDE_METERS * (MAX_SIDE_METERS / MIN_SIDE_METERS) ** (position / 100)
-		);
-	}
 
 	function formatSideMeters(meters: number): string {
 		if (meters >= 1_000_000) return `${(meters / 1_000_000).toFixed(1)} Mm`;
@@ -65,13 +58,11 @@
 	}
 
 	function globeStripeHeightPx(diameter: number): number {
-		return Math.round(roundCm1(diameter) * 160);
+		return stripeHeightPx(roundCm1(diameter));
 	}
 
 	function globeStripeWidthPx(heightPx: number, stripeCount: number): number {
-		const count = Math.round(Number(stripeCount));
-		const dx = 0.09 * (12 / count);
-		return Math.round(2 * dx * heightPx);
+		return stripeWidthPx(heightPx, stripeCount);
 	}
 
 	let center = $state<LatLng | null>(null);
@@ -172,7 +163,12 @@
 		if (job.outputFormat === 'jpg' || job.outputFormat === 'svg') outputFormat = job.outputFormat;
 		if (job.sideMeters != null) sideMeters = job.sideMeters;
 		if (job.center) center = job.center;
-		if (job.placeName) placeName = job.placeName;
+		if (options?.syncMode) {
+			placeName = job.placeName?.trim() || null;
+			mapLayers = validateMapLayers(job.mapLayers);
+		} else if (job.placeName) {
+			placeName = job.placeName;
+		}
 
 		if (job.mode === 'map') {
 			jobManifest = {
@@ -519,7 +515,7 @@
 		<div class="lg:sticky lg:top-20 lg:self-start">
 			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
 				{#if !uploadedMapUrl}
-					<PlaceSearch onselect={onPlaceSelect} />
+					<PlaceSearch value={placeName} onselect={onPlaceSelect} />
 				{/if}
 				{#if uploadedMapUrl}
 					<UploadedMapPreview
@@ -533,7 +529,7 @@
 					>
 						<MapSelector
 							{center}
-							{sideMeters}
+							bind:sideMeters
 							{mapLayers}
 							onchange={onSelectionChange}
 						/>
@@ -628,7 +624,7 @@
 							Upload map
 						</button>
 						<span class="block text-xs text-stone-400">
-							JPEG, PNG, or WebP — used instead of OSM tiles for stripes
+							Use your own square map instead of OpenStreetMap — handy if you already designed one.
 						</span>
 					</div>
 				{/if}
@@ -783,8 +779,7 @@
 							</label>
 						</div>
 						<span class="block text-xs text-stone-400">
-							ZIP: separate stripe JPEGs + pole caps. PDF: one page — stripes side by side,
-							then pole caps (rotated to save space).
+							ZIP — separate files plus a README. PDF — everything on one page for printing.
 						</span>
 					</fieldset>
 				{/if}
@@ -816,8 +811,11 @@
 							</div>
 							{#if mode === 'globe'}
 								<div class="flex justify-between gap-4">
-									<dt class="text-stone-400">Stripe size</dt>
-									<dd>{estimate.stripeWidthPx} × {estimate.stripeHeightPx} px</dd>
+									<dt class="text-stone-400">Strip size</dt>
+									<dd class="text-right">
+										{formatStripePrintSizeCm(estimate.stripeWidthPx, estimate.stripeHeightPx) ??
+											`${estimate.stripeWidthPx} × ${estimate.stripeHeightPx} px`}
+									</dd>
 								</div>
 							{/if}
 						</dl>
@@ -855,8 +853,11 @@
 						</div>
 						{#if mode === 'globe'}
 							<div class="flex justify-between gap-4">
-								<dt class="text-stone-400">Stripe size</dt>
-								<dd>{estimate.stripeWidthPx} × {estimate.stripeHeightPx} px</dd>
+								<dt class="text-stone-400">Strip size</dt>
+								<dd class="text-right">
+									{formatStripePrintSizeCm(estimate.stripeWidthPx, estimate.stripeHeightPx) ??
+										`${estimate.stripeWidthPx} × ${estimate.stripeHeightPx} px`}
+								</dd>
 							</div>
 						{/if}
 					</dl>
@@ -877,6 +878,8 @@
 			files={jobFiles}
 			{mode}
 			stripeCount={mode === 'globe' ? stripes : 0}
+			stripeWidthPx={estimate?.stripeWidthPx ?? jobManifest?.stripeWidthPx ?? 0}
+			stripeHeightPx={estimate?.stripeHeightPx ?? jobManifest?.stripeHeightPx ?? 0}
 			status={jobStatus}
 			revision={jobUpdatedAt}
 			{artifactsAvailable}

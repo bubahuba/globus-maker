@@ -18,6 +18,7 @@ from distort import (
     rasterize_svg,
     spherical_prewarp,
 )
+from globe_readme import diameter_cm_from_stripe_height_px, globe_readme_text
 from PIL import Image
 from job_queue import JobCancelled
 from svg_map import render_svg_map
@@ -30,6 +31,7 @@ INPUT_DISTORTED_SVG = "input-distorted.svg"
 INPUT_JPG = "input.jpg"
 INPUT_DISTORTED_JPG = "input-distorted.jpg"
 POLE_CAPS_JPG = "pole-caps.jpg"
+GLOBE_README_TXT = "README.txt"
 
 
 def _ensure_not_cancelled(cancel_event: asyncio.Event | None) -> None:
@@ -698,7 +700,7 @@ async def _process_job_globe(
 
     diameter_cm = float(payload.get("diameterCm") or 0)
     if diameter_cm <= 0:
-        diameter_cm = stripe_height_px / 160.0
+        diameter_cm = diameter_cm_from_stripe_height_px(stripe_height_px)
 
     _ensure_not_cancelled(cancel_event)
     pole_caps = work_dir / POLE_CAPS_JPG
@@ -763,10 +765,19 @@ async def _process_job_globe(
     )
 
     zip_extras = (INPUT_JPG, POLE_CAPS_JPG) if uploaded else (INPUT_SVG, POLE_CAPS_JPG)
+    readme = work_dir / GLOBE_README_TXT
+    readme.write_text(
+        globe_readme_text(
+            stripe_count=stripes,
+            diameter_cm=diameter_cm,
+            uploaded=uploaded,
+        ),
+        encoding="utf-8",
+    )
     return await _package_and_finish(
         work_dir,
         stripe_files,
-        zip_extras,
+        (GLOBE_README_TXT, *zip_extras),
         callback_url=callback_url,
         schedule_progress=schedule_progress,
         cancel_event=cancel_event,

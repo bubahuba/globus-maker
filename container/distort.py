@@ -32,7 +32,7 @@ JPEG_QUALITY = 98
 # Sphere WebGL preview — keep under typical browser/decode limits.
 SPHERE_PREVIEW_MAX_EDGE = 6000
 
-# Print scale matches BE ``stripeHeightPx = diameterCm × 160``.
+# Print scale: stripe height px = pole-to-pole cm × PRINT_PX_PER_CM (π×diameter/2).
 PRINT_PX_PER_CM = 160.0
 # Inch density for JFIF/DPI tags (printers typically read inches).
 PRINT_DPI = PRINT_PX_PER_CM * 2.54
@@ -226,10 +226,10 @@ def pole_cap_source_radius_px(
     """Radius in the prewarped square for a printed cap of ``cap_diameter_cm``.
 
     Near the map centre, ``nona``/stripe unwrap is approximately linear:
-    ``y_frac ≈ (r / r_mid) * mid_edge_y_frac``. Printed stripe height equals
-    ``globe_diameter_cm`` at ``PRINT_PX_PER_CM``, so a physical distance ``d`` cm
+    ``y_frac ≈ (r / r_mid) * mid_edge_y_frac``. Printed stripe height is pole-to-pole
+    (``π × globe_diameter_cm / 2``) at ``PRINT_PX_PER_CM``, so a physical distance ``d`` cm
     from the tip corresponds to source radius
-    ``r = r_mid * d / (mid_edge_y_frac * globe_diameter_cm)``.
+    ``r = r_mid * d / (mid_edge_y_frac * (π × globe_diameter_cm / 2))``.
 
     ``enlarge > 1`` takes a smaller source disk so the printed cap is magnified.
     Default ``POLE_CAP_ENLARGE`` also compensates nona TM tip magnification so
@@ -243,8 +243,9 @@ def pole_cap_source_radius_px(
         raise ValueError("mid_edge_y_frac must be positive")
 
     r_mid = map_size / 2.0
+    stripe_length_cm = math.pi * globe_diameter_cm / 2.0
     match_cm = (cap_diameter_cm / 2.0) / enlarge
-    src_r = r_mid * match_cm / (mid_edge_y_frac * globe_diameter_cm)
+    src_r = r_mid * match_cm / (mid_edge_y_frac * stripe_length_cm)
     return min(src_r, r_mid)
 
 

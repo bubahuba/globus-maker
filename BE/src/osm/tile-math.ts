@@ -4,7 +4,11 @@ import {
   REF_SIDE_METERS,
   VECTOR_TILE_MAX_ZOOM,
   clampTileZoom,
+  stripeHeightPx,
+  stripeWidthPx,
 } from "../../../shared/tile-constants";
+
+export { stripeHeightPx, stripeWidthPx };
 
 const TILE_SIZE = 256;
 const TARGET_PX = 4500;
@@ -20,15 +24,6 @@ export { MIN_SQUARE_SIDE_PX, MAX_SQUARE_SIDE_PX };
 
 export function normalizeJobMode(mode: unknown): JobMode {
   return mode === "map" ? "map" : "globe";
-}
-
-export function stripeHeightPx(diameterCm: number): number {
-  return Math.round(diameterCm * 160);
-}
-
-export function stripeWidthPx(stripeHeightPx: number, stripes: number): number {
-  const dx = 0.09 * (12 / stripes);
-  return Math.round(2 * dx * stripeHeightPx);
 }
 
 export function squareBounds(center: LatLng, sideMeters: number) {
