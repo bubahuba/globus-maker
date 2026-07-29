@@ -285,8 +285,31 @@ async function runJob(
       return;
     }
 
-    const zipBytes = await response.arrayBuffer();
-    await putArtifact(env.ARTIFACTS, `jobs/${job.id}/stripes.zip`, zipBytes, "application/zip");
+    // Prefer zip already uploaded via PUT /api/jobs/:id/zip (CF Workers often
+    // cannot hold the long /process response until the zip body arrives).
+    let zipBytes = await getArtifact(env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!zipBytes && !contentType.includes("application/json")) {
+      zipBytes = await response.arrayBuffer();
+      if (zipBytes.byteLength > 0) {
+        await putArtifact(env.ARTIFACTS, `jobs/${job.id}/stripes.zip`, zipBytes, "application/zip");
+      }
+    } else if (!zipBytes) {
+      // Drain JSON ack so the connection closes cleanly.
+      await response.arrayBuffer();
+    }
+
+    zipBytes = zipBytes ?? (await getArtifact(env.ARTIFACTS, `jobs/${job.id}/stripes.zip`));
+    if (!zipBytes?.byteLength) {
+      const latest = await getJob(env.ARTIFACTS, job.id);
+      if (latest?.status === "complete") {
+        // Callback path marked complete; zip should exist — re-check once.
+        zipBytes = await getArtifact(env.ARTIFACTS, `jobs/${job.id}/stripes.zip`);
+      }
+      if (!zipBytes?.byteLength) {
+        throw new Error("Processor finished without delivering the zip");
+      }
+    }
 
     await updateJobProgress(env.ARTIFACTS, job.id, {
       status: "complete",
@@ -295,7 +318,7 @@ async function runJob(
     });
     // Zip is the source of truth for download; keep preview JPEGs until download/TTL.
     const completed = await getJob(env.ARTIFACTS, job.id);
-    if (completed && completed.artifactsAvailable === undefined) {
+    if (completed && completed.artifactsAvailable !== false) {
       completed.artifactsAvailable = true;
       await saveJob(env.ARTIFACTS, completed);
     }
@@ -510,6 +533,38 @@ app.put("/api/jobs/:id/files/:name", async (c) => {
   await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/files/${name}`, bytes, contentType);
   await addJobFile(c.env.ARTIFACTS, jobId, name);
   return c.json({ ok: true, file: name });
+});
+
+/** Processor uploads the finished zip here so Workers need not stream it from /process. */
+app.put("/api/jobs/:id/zip", async (c) => {
+  const jobId = c.req.param("id");
+  const job = await getJob(c.env.ARTIFACTS, jobId);
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (job.error === "Cancelled") {
+    return c.json({ ok: true, ignored: true, abort: true });
+  }
+
+  const bytes = await c.req.arrayBuffer();
+  if (!bytes.byteLength) {
+    return c.json({ error: "Empty zip body" }, 400);
+  }
+
+  await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/stripes.zip`, bytes, "application/zip");
+
+  const mode = normalizeJobMode(job.request.mode);
+  await updateJobProgress(c.env.ARTIFACTS, jobId, {
+    status: "complete",
+    progress: 100,
+    stripeCount: mode === "globe" ? job.stripeCount || job.request.stripes : 0,
+  });
+
+  const updated = await getJob(c.env.ARTIFACTS, jobId);
+  if (updated) {
+    updated.artifactsAvailable = true;
+    await saveJob(c.env.ARTIFACTS, updated);
+  }
+
+  return c.json({ ok: true });
 });
 
 app.get("/api/jobs/:id/files/:name", async (c) => {

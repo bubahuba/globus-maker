@@ -41,6 +41,8 @@ PATCH `callbackUrl` with `{ status, progress, stepCurrent, stepTotal, stepUnit, 
 Statuses must match `JobStatus` in `BE/src/types.ts`.
 If the API responds with `{ abort: true }`, stop the job (client cancelled).
 
+After packaging, PUT the finished zip to `{callbackBase}/zip` (derived from `callbackUrl`), then PATCH `complete`. Prefer this over returning the zip as the `/process` response body so Cloudflare Workers do not stall on a long download.
+
 ## Local testing
 
 ```bash

@@ -59,6 +59,14 @@ def _files_base_url(callback_url: str | None) -> str | None:
     return callback_url.rstrip("/") + "/files"
 
 
+def _zip_upload_url(callback_url: str | None) -> str | None:
+    if not callback_url:
+        return None
+    if callback_url.endswith("/progress"):
+        return callback_url[: -len("/progress")] + "/zip"
+    return callback_url.rstrip("/") + "/zip"
+
+
 async def report_progress(callback_url: str | None, payload: dict) -> None:
     if not callback_url:
         return
@@ -77,6 +85,36 @@ async def report_progress(callback_url: str | None, payload: dict) -> None:
     except Exception as exc:
         if os.environ.get("DEBUG_PROGRESS"):
             print(f"[globus] progress callback failed: {exc}", flush=True)
+
+
+async def upload_result_zip(callback_url: str | None, zip_path: Path) -> bool:
+    """Upload finished stripes.zip to the API so Workers need not stream /process."""
+    url = _zip_upload_url(callback_url)
+    if not url or not zip_path.is_file():
+        return False
+    try:
+        data = zip_path.read_bytes()
+        if len(data) < 32:
+            return False
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.put(
+                url,
+                content=data,
+                headers={"Content-Type": "application/zip"},
+            )
+            response.raise_for_status()
+            try:
+                body = response.json()
+            except Exception:
+                body = {}
+            if isinstance(body, dict) and body.get("abort"):
+                raise JobCancelled("Job cancelled")
+        return True
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        print(f"[globus] zip upload failed: {exc}", flush=True)
+        return False
 
 
 def _content_type_for(path: Path) -> str:
@@ -407,7 +445,7 @@ async def _package_and_finish(
     cancel_event: asyncio.Event | None,
     stripe_count: int = 0,
     packaging_start: int = 85,
-) -> Path:
+) -> tuple[Path, bool]:
     _ensure_not_cancelled(cancel_event)
     zip_path = work_dir / "stripes.zip"
     file_total = len(stripe_files) + sum(
@@ -446,6 +484,9 @@ async def _package_and_finish(
     )
     _finish_workdir(work_dir)
 
+    # Deliver zip via callback first (Cloudflare Workers often cannot wait for
+    # the full /process response body). Fall back to returning the file.
+    uploaded = await upload_result_zip(callback_url, zip_path)
     await report_progress(
         callback_url,
         {
@@ -454,7 +495,7 @@ async def _package_and_finish(
             "stripeCount": stripe_count,
         },
     )
-    return zip_path
+    return zip_path, uploaded
 
 
 async def _prewarp_for_stripes(
@@ -589,7 +630,7 @@ async def _process_job_map(
     cancel_event: asyncio.Event | None,
     schedule_progress: Callable[[dict], None],
     output_format: str,
-) -> Path:
+) -> tuple[Path, bool]:
     input_svg, render_palette = await _render_input_svg(
         payload,
         work_dir,
@@ -639,9 +680,7 @@ async def _process_job_globe(
     callback_url: str | None,
     cancel_event: asyncio.Event | None,
     schedule_progress: Callable[[dict], None],
-) -> Path:
-    source_map_url = str(payload.get("sourceMapUrl") or "").strip()
-    uploaded = bool(source_map_url)
+) -> tuple[Path, bool]:
     tiles = payload.get("manifest", {}).get("tiles") or []
     if not uploaded and not tiles:
         raise ValueError(
@@ -790,7 +829,7 @@ async def process_job(
     payload: dict,
     work_root: Path,
     cancel_event: asyncio.Event | None = None,
-) -> Path:
+) -> tuple[Path, bool]:
     job_id = payload["jobId"]
     callback_url = payload.get("callbackUrl")
     mode = str(payload.get("mode") or "globe").lower()

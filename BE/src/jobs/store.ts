@@ -125,6 +125,14 @@ export async function updateJobProgress(
   const job = await getJob(bucket, id);
   if (!job) return null;
 
+  // Fire-and-forget packaging callbacks can land after "complete" and regress the UI.
+  if (job.status === "complete" && update.status !== "complete" && update.status !== "failed") {
+    return job;
+  }
+  if (job.status === "failed" && update.status !== "failed") {
+    return job;
+  }
+
   job.status = update.status;
   job.progress = update.progress;
   job.updatedAt = new Date().toISOString();

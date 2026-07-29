@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
 from job_queue import JobCancelled, processor_queue
@@ -69,11 +69,22 @@ async def process(payload: dict) -> Response:
             },
         )
 
-    async def work(cancel_event) -> Path:
+    async def work(cancel_event) -> tuple[Path, bool]:
         return await process_job(payload, WORK_ROOT, cancel_event=cancel_event)
 
     try:
-        zip_path = await processor_queue.run(job_id, work, on_queue_update=on_queue_update)
+        zip_path, uploaded_via_callback = await processor_queue.run(
+            job_id, work, on_queue_update=on_queue_update
+        )
+        cleanup = BackgroundTask(cleanup_job_workdir, WORK_ROOT, job_id)
+        # When the zip was already PUTted to the API, return a small JSON ack so
+        # Cloudflare Workers are not stuck streaming a large body on /process.
+        if uploaded_via_callback:
+            return JSONResponse(
+                {"ok": True, "jobId": job_id, "zipUploaded": True},
+                background=cleanup,
+            )
+
         place = str(payload.get("placeName") or "globus").strip() or "globus"
         safe = "".join(ch if ch.isalnum() else "-" for ch in place).strip("-")[:60] or "globus"
         diameter = round(float(payload.get("diameterCm") or 0), 1)
@@ -82,8 +93,7 @@ async def process(payload: dict) -> Response:
             zip_path,
             media_type="application/zip",
             filename=f"{safe}-{diameter_label}cm.zip",
-            # Wipe work dir after the zip has been fully sent to the API.
-            background=BackgroundTask(cleanup_job_workdir, WORK_ROOT, job_id),
+            background=cleanup,
         )
     except JobCancelled as exc:
         raise HTTPException(status_code=409, detail=str(exc) or "Job cancelled") from exc

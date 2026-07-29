@@ -23,6 +23,7 @@ alwaysApply: false
 | `DELETE /api/jobs/:id` | Cancel queued/running job |
 | `POST /api/jobs/:id/cancel` | Cancel (beacon-friendly) |
 | `PUT /api/jobs/:id/files/:name` | Processor uploads preview SVG/JPEG |
+| `PUT /api/jobs/:id/zip` | Processor uploads finished `stripes.zip` (marks complete) |
 | `GET /api/jobs/:id/files/:name` | Serve preview SVG/JPEG |
 | `GET /api/jobs/:id/download` | Download zip or `?format=pdf` (globe requires `paid`) |
 | `GET /api/paypal/config` | Public PayPal client id / amount |
