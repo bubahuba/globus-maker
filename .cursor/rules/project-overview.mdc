@@ -27,7 +27,7 @@ Individual services: `dev:processor`, `dev:api`, `dev:fe`. Skip processor: `npm 
 
 - Worker serves `FE/build` via `ASSETS` binding
 - Jobs/artifacts in R2 bucket `globus-maker-artifacts`
-- Processor via `GlobusProcessor` Container DO binding (leave `PROCESSOR_URL` empty)
+- Processor is separate; Worker calls it via `PROCESSOR_URL` (e.g. `https://globus-processor.rascasone.dev`)
 
 ## Conventions
 

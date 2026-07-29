@@ -57,9 +57,6 @@ const DEV_ORIGINS = [
   "http://127.0.0.1:8787",
 ];
 
-/** Shared processor instance so all jobs share one queue. */
-const PROCESSOR_INSTANCE = "shared";
-
 export const app = new Hono<{ Bindings: Env }>();
 
 app.use(
@@ -119,36 +116,24 @@ async function dispatchToProcessor(
   env: Env,
   payload: ProcessPayload,
 ): Promise<Response> {
-  const body = JSON.stringify(payload);
-
-  if (!env.PROCESSOR_URL) {
-    if (!env.PROCESSOR) {
-      throw new Error("No processor configured (set PROCESSOR_URL for local dev)");
-    }
-    const container = env.PROCESSOR.getByName(PROCESSOR_INSTANCE);
-    return container.fetch("http://processor/process", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
+  const base = processorBase(env);
+  if (!base) {
+    throw new Error("No processor configured (set PROCESSOR_URL)");
   }
 
-  return fetch(`${processorBase(env)}/process`, {
+  return fetch(`${base}/process`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body,
+    body: JSON.stringify(payload),
   });
 }
 
 async function cancelOnProcessor(env: Env, jobId: string): Promise<void> {
+  const base = processorBase(env);
+  if (!base) return;
+
   try {
-    if (!env.PROCESSOR_URL) {
-      if (!env.PROCESSOR) return;
-      const container = env.PROCESSOR.getByName(PROCESSOR_INSTANCE);
-      await container.fetch(`http://processor/process/${jobId}`, { method: "DELETE" });
-      return;
-    }
-    await fetch(`${processorBase(env)}/process/${encodeURIComponent(jobId)}`, {
+    await fetch(`${base}/process/${encodeURIComponent(jobId)}`, {
       method: "DELETE",
     });
   } catch {

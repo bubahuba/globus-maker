@@ -33,12 +33,11 @@ alwaysApply: false
 ## Processor dispatch
 
 ```typescript
-// Local: PROCESSOR_URL=http://localhost:8080 → POST /process
-// Prod: env.PROCESSOR.getByName("shared").fetch("http://processor/process", ...)
-// Cancel: DELETE /process/:jobId on the same shared processor
+// PROCESSOR_URL → POST /process, DELETE /process/:jobId
+// Local: http://localhost:8080 | Prod: https://globus-processor.rascasone.dev
 ```
 
-Set `API_CALLBACK_ORIGIN` so Docker processor can PATCH progress (default `http://host.docker.internal:8787`).
+Set `API_CALLBACK_ORIGIN` so the processor can PATCH progress (local Docker: `http://host.docker.internal:8787`; prod: Worker public origin).
 
 ## Job modes
 

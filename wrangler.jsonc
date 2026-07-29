@@ -18,29 +18,6 @@
       "bucket_name": "globus-maker-artifacts"
     }
   ],
-  "containers": [
-    {
-      "class_name": "GlobusProcessor",
-      "image": "./container/Dockerfile",
-      // SVG stitch + light JPEG work — 4 GiB RAM / 8 GB disk is enough.
-      "instance_type": "standard-1",
-      "max_instances": 3
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "PROCESSOR",
-        "class_name": "GlobusProcessor"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["GlobusProcessor"]
-    }
-  ],
   "vars": {
     "PROCESSOR_URL": "https://globus-processor.rascasone.dev"
   }

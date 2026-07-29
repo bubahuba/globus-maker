@@ -47,15 +47,13 @@ Uses `wrangler dev` instead of the standalone API server.
 
 ## Deploy (Cloudflare)
 
-Requires Docker running locally for image build.
-
 ```bash
 npm run deploy
 ```
 
 Create the R2 bucket `globus-maker-artifacts` in your Cloudflare account before first deploy.
 
-For production, leave `PROCESSOR_URL` empty so the Worker uses the `GlobusProcessor` container binding.
+Set `PROCESSOR_URL` in `wrangler.jsonc` (or Workers vars) to your deployed processor, e.g. `https://globus-processor.rascasone.dev`. Also set `API_CALLBACK_ORIGIN` to the Worker public URL so the processor can report progress.
 
 ## API
 

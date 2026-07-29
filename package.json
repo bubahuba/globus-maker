@@ -11,13 +11,12 @@
     "build:fe": "npm ci --prefix FE && npm run build --prefix FE",
     "build": "npm run build:fe",
     "deploy": "npm run build && npx wrangler deploy",
-    "deploy:worker": "npm run build && npx wrangler deploy --containers-rollout=none",
+    "deploy:worker": "npm run deploy",
     "test": "npm run test:be",
     "test:be": "npx tsx BE/tests/tile-math.test.ts && npx tsx BE/tests/map-style.test.ts && npx tsx BE/tests/globe-pdf.test.ts && npx tsx BE/tests/globe-pricing.test.ts",
     "typecheck": "tsc --noEmit -p BE/tsconfig.json"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.0.28",
     "@hono/node-server": "^1.19.14",
     "fflate": "^0.8.3",
     "hono": "^4.12.27",
