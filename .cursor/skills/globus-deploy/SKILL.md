@@ -27,9 +27,11 @@ Build command: `npm run build` (default is fine).
 
 | Binding / var | Purpose |
 |---------------|---------|
-| `ASSETS` | Static SPA from `FE/build` |
+| `ASSETS` | Static SPA from `FE/build` (`not_found_handling: spa` + `run_worker_first: true`) |
 | `ARTIFACTS` | R2 bucket for job state + zip files |
 | `PROCESSOR_URL` | External processor base URL |
+
+`run_worker_first: true` is required so browser navigations to `/api/.../files/*.jpg` hit Hono (not SPA `index.html`). Compatibility date ≥ 2025-04-01 otherwise skips the Worker for `Sec-Fetch-Mode: navigate`.
 
 No Containers / Durable Object processor — processing is a separate service.
 

@@ -10,7 +10,11 @@
   "assets": {
     "directory": "./FE/build",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // SPA fallback must not swallow API navigations (open image in new tab).
+    // true (not only /api/*): asset router still SPA-falls-back navigations to
+    // URLs that look like static files (e.g. /api/.../out-04.jpg).
+    "run_worker_first": true
   },
   "r2_buckets": [
     {
