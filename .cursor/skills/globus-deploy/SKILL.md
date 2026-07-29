@@ -18,6 +18,13 @@ npm run deploy          # build FE + wrangler deploy
 npm run deploy:worker   # skip container rollout
 ```
 
+## Cloudflare Workers Builds (git)
+
+Root `npm ci` does **not** install `FE/` deps. `npm run build` runs `npm ci --prefix FE` first so Vite is available.
+
+Build command: `npm run build` (default is fine).
+Deploy command: leave empty / use Wrangler deploy from the build output.
+
 ## wrangler.jsonc bindings
 
 | Binding | Purpose |
