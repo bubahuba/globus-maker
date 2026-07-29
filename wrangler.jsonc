@@ -42,6 +42,6 @@
     }
   ],
   "vars": {
-    "PROCESSOR_URL": ""
+    "PROCESSOR_URL": "https://globus-processor.rascasone.dev"
   }
 }
