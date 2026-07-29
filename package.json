@@ -13,7 +13,7 @@
     "deploy": "npm run build && npx wrangler deploy",
     "deploy:worker": "npm run deploy",
     "test": "npm run test:be",
-    "test:be": "npx tsx BE/tests/tile-math.test.ts && npx tsx BE/tests/map-style.test.ts && npx tsx BE/tests/globe-pdf.test.ts && npx tsx BE/tests/globe-pricing.test.ts",
+    "test:be": "npx tsx BE/tests/tile-math.test.ts && npx tsx BE/tests/map-style.test.ts && npx tsx BE/tests/globe-pdf.test.ts && npx tsx BE/tests/globe-pricing.test.ts && npx tsx BE/tests/job-store.test.ts",
     "typecheck": "tsc --noEmit -p BE/tsconfig.json"
   },
   "dependencies": {

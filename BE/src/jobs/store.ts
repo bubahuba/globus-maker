@@ -6,35 +6,6 @@ export function createJobId(): string {
   return crypto.randomUUID();
 }
 
-export async function saveJob(
-  bucket: R2Bucket | undefined,
-  job: JobRecord,
-): Promise<void> {
-  memoryJobs.set(job.id, structuredClone(job));
-  if (bucket) {
-    await bucket.put(`jobs/${job.id}/status.json`, JSON.stringify(job), {
-      httpMetadata: { contentType: "application/json" },
-    });
-  }
-}
-
-export async function getJob(
-  bucket: R2Bucket | undefined,
-  id: string,
-): Promise<JobRecord | null> {
-  const cached = memoryJobs.get(id);
-  if (cached) return structuredClone(cached);
-
-  if (!bucket) return null;
-
-  const obj = await bucket.get(`jobs/${id}/status.json`);
-  if (!obj) return null;
-
-  const job = (await obj.json()) as JobRecord;
-  memoryJobs.set(id, job);
-  return structuredClone(job);
-}
-
 function sortJobFiles(files: Iterable<string>): string[] {
   const rank = (name: string): number => {
     const lower = name.toLowerCase();
@@ -51,13 +22,99 @@ function sortJobFiles(files: Iterable<string>): string[] {
   });
 }
 
-function mergeJobFiles(...lists: Array<string[] | undefined>): string[] | undefined {
+/** Exported for tests — union + stable preview order. */
+export function mergeJobFiles(...lists: Array<string[] | undefined>): string[] | undefined {
   const merged = new Set<string>();
   for (const list of lists) {
     for (const name of list ?? []) merged.add(name);
   }
   if (merged.size === 0) return undefined;
   return sortJobFiles(merged);
+}
+
+const JOB_FILE_RE =
+  /^(?:(?:input|input-distorted|source-map)\.(?:jpg|jpeg|svg|png|webp)|input-distorted-preview\.jpe?g|pole-caps\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
+
+export function isAllowedJobFilename(name: string): boolean {
+  return JOB_FILE_RE.test(name);
+}
+
+export function contentTypeForJobFile(name: string): string {
+  if (/\.svg$/i.test(name)) return "image/svg+xml";
+  if (/\.jpe?g$/i.test(name)) return "image/jpeg";
+  if (/\.png$/i.test(name)) return "image/png";
+  if (/\.webp$/i.test(name)) return "image/webp";
+  return "application/octet-stream";
+}
+
+/** Filenames actually stored under jobs/{id}/files/ (source of truth across isolates). */
+async function listStoredJobFilenames(
+  bucket: R2Bucket,
+  jobId: string,
+): Promise<string[]> {
+  const prefix = `jobs/${jobId}/files/`;
+  const names: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const listed = await bucket.list({ prefix, cursor });
+    for (const obj of listed.objects) {
+      const name = obj.key.slice(prefix.length);
+      if (name && !name.includes("/") && isAllowedJobFilename(name)) {
+        names.push(name);
+      }
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+  return names;
+}
+
+async function reconcileJobFiles(
+  bucket: R2Bucket | undefined,
+  job: JobRecord,
+  ...extraLists: Array<string[] | undefined>
+): Promise<void> {
+  const listed = bucket ? await listStoredJobFilenames(bucket, job.id) : [];
+  const files = mergeJobFiles(job.files, ...extraLists, listed);
+  if (files) job.files = files;
+  else delete job.files;
+}
+
+export async function saveJob(
+  bucket: R2Bucket | undefined,
+  job: JobRecord,
+): Promise<void> {
+  if (bucket) {
+    // Merge concurrent writers: status.json files field + objects already in R2.
+    const existingObj = await bucket.get(`jobs/${job.id}/status.json`);
+    const existing = existingObj ? ((await existingObj.json()) as JobRecord) : null;
+    await reconcileJobFiles(bucket, job, existing?.files);
+
+    await bucket.put(`jobs/${job.id}/status.json`, JSON.stringify(job), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  }
+  memoryJobs.set(job.id, structuredClone(job));
+}
+
+export async function getJob(
+  bucket: R2Bucket | undefined,
+  id: string,
+): Promise<JobRecord | null> {
+  // Prefer R2 so waitUntil isolates don't keep a stale in-memory snapshot
+  // that overwrites preview files uploaded by other isolates.
+  if (bucket) {
+    const obj = await bucket.get(`jobs/${id}/status.json`);
+    if (obj) {
+      const job = (await obj.json()) as JobRecord;
+      await reconcileJobFiles(bucket, job);
+      memoryJobs.set(id, structuredClone(job));
+      return structuredClone(job);
+    }
+  }
+
+  const cached = memoryJobs.get(id);
+  if (!cached) return null;
+  return structuredClone(cached);
 }
 
 export async function updateJobProgress(
@@ -90,32 +147,12 @@ export async function updateJobProgress(
     delete job.queueLength;
   }
 
-  // Preserve files added concurrently by upload handlers (avoid lost updates).
-  const latestFiles = mergeJobFiles(job.files, memoryJobs.get(id)?.files);
-  if (latestFiles) job.files = latestFiles;
-  else delete job.files;
-
   await saveJob(bucket, job);
   return job;
 }
 
 export function isTerminalStatus(status: JobStatus): boolean {
   return status === "complete" || status === "failed";
-}
-
-const JOB_FILE_RE =
-  /^(?:(?:input|input-distorted|source-map)\.(?:jpg|jpeg|svg|png|webp)|input-distorted-preview\.jpe?g|pole-caps\.jpe?g|out-\d+\.(?:jpg|jpeg|svg))$/i;
-
-export function isAllowedJobFilename(name: string): boolean {
-  return JOB_FILE_RE.test(name);
-}
-
-export function contentTypeForJobFile(name: string): string {
-  if (/\.svg$/i.test(name)) return "image/svg+xml";
-  if (/\.jpe?g$/i.test(name)) return "image/jpeg";
-  if (/\.png$/i.test(name)) return "image/png";
-  if (/\.webp$/i.test(name)) return "image/webp";
-  return "application/octet-stream";
 }
 
 export async function addJobFile(
@@ -126,7 +163,7 @@ export async function addJobFile(
   const job = await getJob(bucket, id);
   if (!job) return null;
 
-  job.files = mergeJobFiles(job.files, memoryJobs.get(id)?.files, [filename]) ?? [filename];
+  job.files = mergeJobFiles(job.files, [filename]) ?? [filename];
   // Always bump updatedAt so clients can cache-bust replaced preview bytes.
   job.updatedAt = new Date().toISOString();
   await saveJob(bucket, job);
