@@ -18,6 +18,16 @@
       "bucket_name": "globus-maker-artifacts"
     }
   ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GlobusProcessor"]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": ["GlobusProcessor"]
+    }
+  ],
   "vars": {
     "PROCESSOR_URL": "https://globus-processor.rascasone.dev"
   }
