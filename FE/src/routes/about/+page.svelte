@@ -1,64 +1,100 @@
 <script lang="ts">
-	const mapImages = [
+	import AboutImageLightbox from '@lib/components/AboutImageLightbox.svelte';
+
+	type AboutImage = {
+		slug: string;
+		alt: string;
+		caption: string;
+	};
+
+	const mapImages: readonly AboutImage[] = [
 		{
-			src: '/about/map-mode-framed-wall-normal.png',
+			slug: 'map-mode-framed-wall-normal',
 			alt: 'Framed city map print on a living-room wall in normal light',
 			caption: 'Print & frame — a square city map for your wall'
 		},
 		{
-			src: '/about/map-mode-framed-wall-enlighted.png',
+			slug: 'map-mode-framed-wall-enlighted',
 			alt: 'Backlit framed city map glowing on a living-room wall',
 			caption: 'Lit print — the same map as a soft lightbox'
 		},
 		{
-			src: '/about/map-mode-artistic-saturated-normal.png',
+			slug: 'map-mode-artistic-saturated-normal',
 			alt: 'Framed city map with magenta streets and teal land on a living-room wall',
 			caption: 'Artistic layers — magenta streets, teal land, coral blocks'
 		},
 		{
-			src: '/about/map-mode-artistic-saturated-lit.png',
+			slug: 'map-mode-artistic-saturated-lit',
 			alt: 'Backlit framed city map with cobalt, pink, and lime colors',
 			caption: 'Neon lightbox — cobalt land, pink streets, lime parks'
 		},
 		{
-			src: '/about/map-mode-artistic-poster.png',
+			slug: 'map-mode-artistic-poster',
 			alt: 'Framed mustard and burgundy artistic city map poster on a wall',
 			caption: 'Poster vibe — mustard land, burgundy streets, aqua blocks'
 		}
-	] as const;
+	];
 
-	const globeImages = [
+	const globeImages: readonly AboutImage[] = [
 		{
-			src: '/about/sphere-lamp-map-projection-hero.png',
+			slug: 'sphere-lamp-map-projection-hero',
 			alt: 'City map sphere lamp projecting soft map light in a living room',
 			caption: 'Sphere lamp — your city map wrapped on glass'
 		},
 		{
-			src: '/about/sphere-lamp-map-wrap-detail.png',
+			slug: 'sphere-lamp-map-wrap-detail',
 			alt: 'Close-up of transparent city map wrap on a glowing glass sphere',
 			caption: 'Map wrap — streets and buildings on clear film'
 		},
 		{
-			src: '/about/sphere-lamp-room-projection-wide.png',
+			slug: 'sphere-lamp-room-projection-wide',
 			alt: 'Wide view of a room lit by map projections from a sphere lamp',
 			caption: 'Room glow — meridians cast softly on the walls'
 		},
 		{
-			src: '/about/globe-mode-artistic-sphere-hero.png',
+			slug: 'globe-mode-artistic-sphere-hero',
 			alt: 'Sphere lamp with violet, neon yellow, and fuchsia city map wrap',
 			caption: 'Bold sphere — violet land, neon streets, fuchsia blocks'
 		},
 		{
-			src: '/about/globe-mode-artistic-wrap-detail.png',
+			slug: 'globe-mode-artistic-wrap-detail',
 			alt: 'Close-up of crimson and indigo artistic city map on glass sphere',
 			caption: 'Color wrap — crimson streets, indigo blocks, chartreuse parks'
 		},
 		{
-			src: '/about/globe-mode-artistic-room-wide.png',
+			slug: 'globe-mode-artistic-room-wide',
 			alt: 'Room washed in colorful projections from an artistic city-map sphere lamp',
 			caption: 'Color wash — tangerine land casting pink and teal light'
 		}
-	] as const;
+	];
+
+	const THUMB_SRCSET = (slug: string) =>
+		`/about/${slug}-640.webp 640w, /about/${slug}-960.webp 960w, /about/${slug}-1280.webp 1280w`;
+
+	const THUMB_SRC = (slug: string) => `/about/${slug}-960.webp`;
+
+	type Gallery = 'map' | 'globe';
+
+	let lightboxGallery = $state<Gallery | null>(null);
+	let lightboxIndex = $state<number | null>(null);
+
+	const lightboxImages = $derived(
+		lightboxGallery === 'map' ? mapImages : lightboxGallery === 'globe' ? globeImages : []
+	);
+
+	function openLightbox(gallery: Gallery, index: number) {
+		lightboxGallery = gallery;
+		lightboxIndex = index;
+	}
+
+	function closeLightbox() {
+		lightboxGallery = null;
+		lightboxIndex = null;
+	}
+
+	function navigateLightbox(index: number) {
+		lightboxIndex = index;
+	}
 </script>
 
 <svelte:head>
@@ -96,14 +132,23 @@
 		</div>
 
 		<div class="grid gap-5 sm:grid-cols-2">
-			{#each mapImages as image (image.src)}
+			{#each mapImages as image, i (image.slug)}
 				<figure class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200">
-					<img
-						src={image.src}
-						alt={image.alt}
-						class="aspect-video w-full object-cover"
-						loading="lazy"
-					/>
+					<button
+						type="button"
+						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2"
+						onclick={() => openLightbox('map', i)}
+						aria-label={`View larger: ${image.caption}`}
+					>
+						<img
+							src={THUMB_SRC(image.slug)}
+							srcset={THUMB_SRCSET(image.slug)}
+							sizes="(min-width: 640px) 50vw, 100vw"
+							alt={image.alt}
+							class="aspect-video w-full object-cover transition group-hover:opacity-90"
+							loading="lazy"
+						/>
+					</button>
 					<figcaption class="px-4 py-3 text-sm text-stone-600">{image.caption}</figcaption>
 				</figure>
 			{/each}
@@ -124,19 +169,30 @@
 		</div>
 
 		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-			{#each globeImages as image, i (image.src)}
+			{#each globeImages as image, i (image.slug)}
 				<figure
 					class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200
 						{i === 0 || i === 3 ? 'sm:col-span-2 lg:col-span-3' : ''}"
 				>
-					<img
-						src={image.src}
-						alt={image.alt}
-						class="w-full object-cover {i === 0 || i === 3
-							? 'aspect-[21/9] sm:aspect-[2.4/1]'
-							: 'aspect-video'}"
-						loading="lazy"
-					/>
+					<button
+						type="button"
+						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2"
+						onclick={() => openLightbox('globe', i)}
+						aria-label={`View larger: ${image.caption}`}
+					>
+						<img
+							src={THUMB_SRC(image.slug)}
+							srcset={THUMB_SRCSET(image.slug)}
+							sizes={i === 0 || i === 3
+								? '(min-width: 1024px) 72rem, 100vw'
+								: '(min-width: 1024px) 24rem, (min-width: 640px) 50vw, 100vw'}
+							alt={image.alt}
+							class="w-full object-cover transition group-hover:opacity-90 {i === 0 || i === 3
+								? 'aspect-[21/9] sm:aspect-[2.4/1]'
+								: 'aspect-video'}"
+							loading="lazy"
+						/>
+					</button>
 					<figcaption class="px-4 py-3 text-sm text-stone-600">{image.caption}</figcaption>
 				</figure>
 			{/each}
@@ -179,3 +235,10 @@
 		</p>
 	</section>
 </main>
+
+<AboutImageLightbox
+	images={lightboxImages}
+	index={lightboxIndex}
+	onClose={closeLightbox}
+	onNavigate={navigateLightbox}
+/>
