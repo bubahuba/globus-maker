@@ -681,6 +681,8 @@ async def _process_job_globe(
     cancel_event: asyncio.Event | None,
     schedule_progress: Callable[[dict], None],
 ) -> tuple[Path, bool]:
+    source_map_url = str(payload.get("sourceMapUrl") or "").strip()
+    uploaded = bool(source_map_url)
     tiles = payload.get("manifest", {}).get("tiles") or []
     if not uploaded and not tiles:
         raise ValueError(
