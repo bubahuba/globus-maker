@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import {
 		createCenterMarker,
 		createSquareLayer,
@@ -9,7 +9,11 @@
 		updateMapStyle,
 		type MapSelection
 	} from '@lib/map/leaflet';
-	import { adjustSideMetersFromWheel } from '@lib/map/selection-size';
+	import {
+		adjustSideMetersBySliderStep,
+		adjustSideMetersFromWheel,
+		sideToSlider
+	} from '@lib/map/selection-size';
 	import { MAP_LAYER_KEYS, type MapLayerStyle } from '@shared/map-style';
 
 	interface Props {
@@ -53,7 +57,11 @@
 		fitSelectionInView(map, c, sideMeters, { animate });
 	}
 
-	function setCenterAt(lat: number, lng: number, fly = true) {
+	/**
+	 * @param emit - When false, sync from parent `center` prop without echoing
+	 *   onchange (echoing was overwriting a new search pick with the old pin).
+	 */
+	function setCenterAt(lat: number, lng: number, fly = true, emit = true) {
 		if (!map) return;
 
 		if (!marker) {
@@ -63,18 +71,18 @@
 				draggingMarker = true;
 			});
 			marker.on('drag', () => {
-				updateSquare();
+				updateSquare(true);
 			});
 			marker.on('dragend', () => {
 				draggingMarker = false;
-				updateSquare();
+				updateSquare(true);
 				frameSelection(true);
 			});
 		} else {
 			marker.setLatLng([lat, lng]);
 		}
 
-		updateSquare();
+		updateSquare(emit);
 		frameSelection(fly);
 	}
 
@@ -87,7 +95,7 @@
 		});
 	}
 
-	function updateSquare() {
+	function updateSquare(emit = true) {
 		if (!map || !marker) return;
 		const latlng = marker.getLatLng();
 		const bounds = squareBounds({ lat: latlng.lat, lng: latlng.lng }, sideMeters);
@@ -97,7 +105,7 @@
 			square = createSquareLayer(bounds);
 			square.addTo(map);
 		}
-		emitChange();
+		if (emit) emitChange();
 	}
 
 	function clearSelection() {
@@ -132,6 +140,15 @@
 		});
 	}
 
+	const canShrinkSide = $derived(sideToSlider(sideMeters) > 0);
+	const canGrowSide = $derived(sideToSlider(sideMeters) < 100);
+
+	function nudgeSideMeters(steps: number) {
+		const next = adjustSideMetersBySliderStep(sideMeters, steps);
+		if (next === sideMeters) return;
+		sideMeters = next;
+	}
+
 	onMount(() => {
 		if (!mapEl) return;
 		const el = mapEl;
@@ -145,10 +162,10 @@
 		const initialized = initMap(el, center, mapLayers);
 		map = initialized.map;
 		baseLayer = initialized.baseLayer;
-		if (center) setCenterAt(center.lat, center.lng, false);
+		if (center) setCenterAt(center.lat, center.lng, false, false);
 
 		map.on('click', (event) => {
-			setCenterAt(event.latlng.lat, event.latlng.lng);
+			setCenterAt(event.latlng.lat, event.latlng.lng, true, true);
 		});
 
 		const onWheel = (event: WheelEvent) => {
@@ -180,10 +197,12 @@
 	});
 
 	$effect(() => {
+		// Only react to sideMeters — not marker/map reads inside updateSquare/frameSelection.
 		sideMeters;
-		updateSquare();
-		// Instant fit so the range slider feels live while dragging.
-		frameSelection(false);
+		untrack(() => {
+			updateSquare(true);
+			frameSelection(false);
+		});
 	});
 
 	$effect(() => {
@@ -200,18 +219,21 @@
 		if (!map) return;
 
 		if (!center) {
-			clearSelection();
+			untrack(() => clearSelection());
 			return;
 		}
 
-		const current = marker?.getLatLng();
+		const lat = center.lat;
+		const lng = center.lng;
+		const current = untrack(() => marker?.getLatLng());
 		const changed =
 			!current ||
-			Math.abs(current.lat - center.lat) > 0.000001 ||
-			Math.abs(current.lng - center.lng) > 0.000001;
+			Math.abs(current.lat - lat) > 0.000001 ||
+			Math.abs(current.lng - lng) > 0.000001;
 
 		if (changed) {
-			setCenterAt(center.lat, center.lng);
+			// Prop → map only. Do not emit or parent search picks get overwritten.
+			untrack(() => setCenterAt(lat, lng, true, false));
 		}
 	});
 </script>
@@ -233,14 +255,16 @@
 		</div>
 	{/if}
 
-	{#if fullscreenSupported}
-		<div class="pointer-events-none absolute inset-0 z-[1100]">
+	<div
+		class="pointer-events-none absolute inset-0 z-[1100] flex flex-col items-end gap-2 p-3"
+	>
+		{#if fullscreenSupported}
 			<button
 				type="button"
 				onclick={toggleFullscreen}
 				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
 				title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-				class="pointer-events-auto absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50"
+				class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50"
 			>
 				{#if isFullscreen}
 					<svg
@@ -278,6 +302,52 @@
 					</svg>
 				{/if}
 			</button>
-		</div>
-	{/if}
+		{/if}
+
+		<button
+			type="button"
+			onclick={() => nudgeSideMeters(-1)}
+			disabled={!canShrinkSide}
+			aria-label="Zoom in"
+			title="Zoom in"
+			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+		>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				class="h-4 w-4"
+				aria-hidden="true"
+			>
+				<path d="M12 5v14" />
+				<path d="M5 12h14" />
+			</svg>
+		</button>
+		<button
+			type="button"
+			onclick={() => nudgeSideMeters(1)}
+			disabled={!canGrowSide}
+			aria-label="Zoom out"
+			title="Zoom out"
+			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+		>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				class="h-4 w-4"
+				aria-hidden="true"
+			>
+				<path d="M5 12h14" />
+			</svg>
+		</button>
+	</div>
 </div>

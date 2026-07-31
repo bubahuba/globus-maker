@@ -177,27 +177,16 @@
 		if (job.stripes != null) stripes = job.stripes;
 		if (job.diameterCm != null) diameterCm = job.diameterCm;
 		if (job.outputFormat === 'jpg' || job.outputFormat === 'svg') outputFormat = job.outputFormat;
-		// Only push selection fields when opening a job (or values actually change).
-		// Reassigning `center` on every poll retriggers estimate and cancels reverse-geocode.
+		// Selection (center / side / placeName) only when opening a job — never on poll.
+		// Polls were snapping the pin/search back to the job location after a new place pick.
 		if (options?.syncMode) {
 			clearTimeout(reverseTimer);
 			reverseSeq += 1;
+			lastReverseKey = '';
 			if (job.sideMeters != null) sideMeters = job.sideMeters;
 			if (job.center) center = job.center;
 			placeName = job.placeName?.trim() || null;
 			mapLayers = validateMapLayers(job.mapLayers);
-		} else {
-			if (job.sideMeters != null && job.sideMeters !== sideMeters) {
-				sideMeters = job.sideMeters;
-			}
-			if (
-				job.center &&
-				(!center ||
-					Math.abs(center.lat - job.center.lat) > 0.000001 ||
-					Math.abs(center.lng - job.center.lng) > 0.000001)
-			) {
-				center = job.center;
-			}
 		}
 
 		if (job.mode === 'map') {
@@ -414,12 +403,14 @@
 	}
 
 	function onPlaceSelect(result: GeocodeResult) {
-		// Cancel any in-flight reverse from a prior pin move; search already named the place.
+		// Cancel reverse from prior pin moves; keep the searched name until the user moves the pin.
 		clearTimeout(reverseTimer);
 		reverseSeq += 1;
-		lastReverseKey = '';
-		center = { lat: result.lat, lng: result.lng };
-		placeName = placeLabelFromDisplayName(result.displayName, result.label);
+		const label = placeLabelFromDisplayName(result.displayName, result.label);
+		const next = { lat: result.lat, lng: result.lng };
+		lastReverseKey = `${next.lat.toFixed(5)},${next.lng.toFixed(5)},${nominatimZoomFromSideMeters(sideMeters)}`;
+		center = next;
+		placeName = label;
 	}
 
 	function clearUploadedMap() {

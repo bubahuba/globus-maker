@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { searchPlaces, type GeocodeResult } from '@lib/api/geocode';
+	import { placeLabelFromDisplayName, searchPlaces, type GeocodeResult } from '@lib/api/geocode';
 
 	interface Props {
 		value?: string | null;
@@ -8,9 +8,9 @@
 
 	let { value = null, onselect }: Props = $props();
 
-	/** When set, input shows draft; when null, input follows parent `value`. */
-	let draft = $state<string | null>(null);
-	const display = $derived(draft ?? value?.trim() ?? '');
+	/** Local input text. Synced from parent only when `value` changes externally. */
+	let query = $state('');
+	let lastExternalValue = $state<string | null>(null);
 
 	let results = $state<GeocodeResult[]>([]);
 	let searching = $state(false);
@@ -19,10 +19,12 @@
 
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-	// Parent value changed (reverse geocode / job restore) → drop local draft.
+	// Apply parent updates (reverse geocode / job open) without clobbering keystrokes.
 	$effect(() => {
-		value;
-		draft = null;
+		const next = value?.trim() || null;
+		if (next === lastExternalValue) return;
+		lastExternalValue = next;
+		if (next) query = next;
 	});
 
 	async function runSearch(searchValue: string) {
@@ -43,7 +45,7 @@
 
 	function onInput(event: Event) {
 		const next = (event.currentTarget as HTMLInputElement).value;
-		draft = next;
+		query = next;
 		clearTimeout(debounceTimer);
 
 		if (next.trim().length < 2) {
@@ -57,7 +59,9 @@
 	}
 
 	function pickResult(result: GeocodeResult) {
-		draft = null;
+		const label = placeLabelFromDisplayName(result.displayName, result.label);
+		query = label;
+		lastExternalValue = label;
 		open = false;
 		results = [];
 		onselect?.(result);
@@ -78,7 +82,7 @@
 				id="place-search"
 				type="search"
 				placeholder="City, town, address…"
-				value={display}
+				value={query}
 				oninput={onInput}
 				onfocus={() => {
 					if (results.length > 0) open = true;
@@ -98,7 +102,10 @@
 							<button
 								type="button"
 								class="w-full px-4 py-2 text-left text-sm text-stone-800 hover:bg-amber-50"
-								onmousedown={() => pickResult(result)}
+								onmousedown={(event) => {
+									event.preventDefault();
+									pickResult(result);
+								}}
 							>
 								{result.displayName}
 							</button>

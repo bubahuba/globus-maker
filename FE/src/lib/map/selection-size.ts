@@ -29,6 +29,20 @@ export function sliderToSide(position: number): number {
 	);
 }
 
+/** Matches the square-side range input `step` on the main page. */
+export const SIDE_SLIDER_STEP = 0.5;
+
+/** Adjust side length by N log-slider steps (+ = larger square, − = smaller). */
+export function adjustSideMetersBySliderStep(
+	currentMeters: number,
+	steps: number,
+	stepSize = SIDE_SLIDER_STEP
+): number {
+	if (steps === 0) return currentMeters;
+	const slider = sideToSlider(currentMeters) + steps * stepSize;
+	return sliderToSide(Math.min(100, Math.max(0, slider)));
+}
+
 /** Adjust side length from a wheel delta (scroll up = smaller, down = larger). */
 export function adjustSideMetersFromWheel(currentMeters: number, deltaY: number): number {
 	if (deltaY === 0) return currentMeters;
