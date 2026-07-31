@@ -9,7 +9,11 @@
 	import JobCard from '@lib/components/JobCard.svelte';
 	import JobOutputs from '@lib/components/JobOutputs.svelte';
 	import { cancelJob, createJob, estimateJob, getJob, pollJob } from '@lib/api/jobs';
-	import type { GeocodeResult } from '@lib/api/geocode';
+	import {
+		placeLabelFromDisplayName,
+		reverseGeocode,
+		type GeocodeResult
+	} from '@lib/api/geocode';
 	import type {
 		CreateJobResponse,
 		EstimateResponse,
@@ -25,11 +29,18 @@
 	import { loadMapLayers, saveMapLayers } from '@lib/map/layers-storage';
 	import {
 		MIN_SIDE_METERS,
+		nominatimZoomFromSideMeters,
 		sideToSlider,
 		sliderToSide
 	} from '@lib/map/selection-size';
 	import { getBaseFillColor, getMapCanvasColor, validateMapLayers } from '@shared/map-style';
-import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx, stripeWidthPx } from '@shared/tile-constants';
+	import {
+		clampTileZoom,
+		formatStripePrintSizeCm,
+		MAX_SIDE_METERS,
+		stripeHeightPx,
+		stripeWidthPx
+	} from '@shared/tile-constants';
 	const MIN_SQUARE_SIDE_PX = 500;
 	const MAX_SQUARE_SIDE_PX = 10000;
 	const DEFAULT_SQUARE_SIDE_PX = 4000;
@@ -86,6 +97,11 @@ import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx
 
 	let estimateSeq = 0;
 	let estimateTimer: ReturnType<typeof setTimeout> | undefined;
+
+	let reverseSeq = 0;
+	let reverseTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Dedupe reverse lookups for the same pin + detail level. */
+	let lastReverseKey = '';
 
 	let jobId = $state<string | null>(null);
 	let jobStatus = $state<JobStatus | null>(null);
@@ -161,13 +177,27 @@ import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx
 		if (job.stripes != null) stripes = job.stripes;
 		if (job.diameterCm != null) diameterCm = job.diameterCm;
 		if (job.outputFormat === 'jpg' || job.outputFormat === 'svg') outputFormat = job.outputFormat;
-		if (job.sideMeters != null) sideMeters = job.sideMeters;
-		if (job.center) center = job.center;
+		// Only push selection fields when opening a job (or values actually change).
+		// Reassigning `center` on every poll retriggers estimate and cancels reverse-geocode.
 		if (options?.syncMode) {
+			clearTimeout(reverseTimer);
+			reverseSeq += 1;
+			if (job.sideMeters != null) sideMeters = job.sideMeters;
+			if (job.center) center = job.center;
 			placeName = job.placeName?.trim() || null;
 			mapLayers = validateMapLayers(job.mapLayers);
-		} else if (job.placeName) {
-			placeName = job.placeName;
+		} else {
+			if (job.sideMeters != null && job.sideMeters !== sideMeters) {
+				sideMeters = job.sideMeters;
+			}
+			if (
+				job.center &&
+				(!center ||
+					Math.abs(center.lat - job.center.lat) > 0.000001 ||
+					Math.abs(center.lng - job.center.lng) > 0.000001)
+			) {
+				center = job.center;
+			}
 		}
 
 		if (job.mode === 'map') {
@@ -319,6 +349,31 @@ import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx
 		}, 200);
 	}
 
+	async function refreshPlaceFromCenter(next: LatLng, zoom: number) {
+		if (uploadedMapUrl) return;
+
+		const seq = ++reverseSeq;
+		try {
+			const result = await reverseGeocode(next.lat, next.lng, zoom);
+			if (seq !== reverseSeq) return;
+			if (!result) return;
+			placeName = placeLabelFromDisplayName(result.displayName, result.label);
+		} catch {
+			// Keep previous place name if reverse geocoding fails.
+		}
+	}
+
+	function scheduleReversePlaceName(next: LatLng, zoom: number) {
+		if (uploadedMapUrl) return;
+		const key = `${next.lat.toFixed(5)},${next.lng.toFixed(5)},${zoom}`;
+		if (key === lastReverseKey) return;
+		clearTimeout(reverseTimer);
+		reverseTimer = setTimeout(() => {
+			lastReverseKey = key;
+			void refreshPlaceFromCenter(next, zoom);
+		}, 400);
+	}
+
 	function currentRequest(): JobRequest {
 		const base: JobRequest = {
 			center: center ?? { lat: 0, lng: 0 },
@@ -343,12 +398,28 @@ import { clampTileZoom, formatStripePrintSizeCm, MAX_SIDE_METERS, stripeHeightPx
 	}
 
 	function onSelectionChange(selection: { center: LatLng; sideMeters: number }) {
-		center = selection.center;
+		const prevCenter = center;
+		const centerChanged =
+			!prevCenter ||
+			Math.abs(prevCenter.lat - selection.center.lat) > 0.000001 ||
+			Math.abs(prevCenter.lng - selection.center.lng) > 0.000001;
+
+		// Avoid reassigning center when only side-meters changed — that retriggers estimate.
+		if (centerChanged) center = selection.center;
+
+		scheduleReversePlaceName(
+			selection.center,
+			nominatimZoomFromSideMeters(selection.sideMeters)
+		);
 	}
 
 	function onPlaceSelect(result: GeocodeResult) {
+		// Cancel any in-flight reverse from a prior pin move; search already named the place.
+		clearTimeout(reverseTimer);
+		reverseSeq += 1;
+		lastReverseKey = '';
 		center = { lat: result.lat, lng: result.lng };
-		placeName = result.displayName.split(',')[0]?.trim() || result.displayName;
+		placeName = placeLabelFromDisplayName(result.displayName, result.label);
 	}
 
 	function clearUploadedMap() {

@@ -29,7 +29,8 @@ alwaysApply: false
 | `GET /api/paypal/config` | Public PayPal client id / amount |
 | `POST /api/paypal/orders` | Create PayPal order for globe zip |
 | `POST /api/paypal/orders/:orderId/capture` | Capture + unlock globe zip |
-| `GET /api/geocode?q=` | Nominatim proxy |
+| `GET /api/geocode?q=` | Nominatim forward search proxy |
+| `GET /api/reverse-geocode?lat=&lng=&zoom=` | Nominatim reverse geocode (`zoom` from selection size; returns `label`) |
 
 ## Processor dispatch
 

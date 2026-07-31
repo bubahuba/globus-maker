@@ -26,6 +26,7 @@
 		onchange
 	}: Props = $props();
 
+	let rootEl: HTMLDivElement | undefined = $state();
 	let mapEl: HTMLDivElement | undefined = $state();
 	let map: import('leaflet').Map | undefined = $state();
 	let baseLayer: ReturnType<typeof initMap>['baseLayer'] | undefined = $state();
@@ -33,6 +34,9 @@
 	let marker: import('leaflet').Marker | undefined;
 	/** Skip re-fitting while the user drags the center marker. */
 	let draggingMarker = false;
+	let isFullscreen = $state(false);
+	/** Assume supported; hide only if the API is clearly missing after mount. */
+	let fullscreenSupported = $state(true);
 
 	function selectionCenter(): { lat: number; lng: number } | null {
 		if (marker) {
@@ -107,9 +111,36 @@
 		}
 	}
 
+	function syncFullscreenState() {
+		isFullscreen = document.fullscreenElement === rootEl;
+	}
+
+	async function toggleFullscreen() {
+		if (!rootEl) return;
+		try {
+			if (document.fullscreenElement === rootEl) {
+				await document.exitFullscreen();
+			} else if (typeof rootEl.requestFullscreen === 'function') {
+				await rootEl.requestFullscreen();
+			}
+		} catch {
+			// Fullscreen request may be denied by the browser; ignore.
+		}
+		queueMicrotask(() => {
+			map?.invalidateSize();
+			baseLayer?.getMaplibreMap().resize();
+		});
+	}
+
 	onMount(() => {
 		if (!mapEl) return;
 		const el = mapEl;
+
+		fullscreenSupported =
+			!!document.fullscreenEnabled &&
+			!!(rootEl && typeof rootEl.requestFullscreen === 'function');
+		document.addEventListener('fullscreenchange', syncFullscreenState);
+		syncFullscreenState();
 
 		const initialized = initMap(el, center, mapLayers);
 		map = initialized.map;
@@ -133,7 +164,7 @@
 		const resizeMap = () => {
 			map?.invalidateSize();
 			baseLayer?.getMaplibreMap().resize();
-			frameSelection(false);
+			// Do not re-fit here — it fights free pan and stalls MapLibre tile loads.
 		};
 		requestAnimationFrame(resizeMap);
 
@@ -141,6 +172,7 @@
 		ro.observe(el);
 
 		return () => {
+			document.removeEventListener('fullscreenchange', syncFullscreenState);
 			el.removeEventListener('wheel', onWheel);
 			ro.disconnect();
 			map?.remove();
@@ -184,16 +216,68 @@
 	});
 </script>
 
-<div class="relative z-1 h-full w-full">
-	<div bind:this={mapEl} class="absolute inset-0"></div>
+<div
+	bind:this={rootEl}
+	class="relative z-1 h-full w-full {isFullscreen ? 'bg-stone-900' : 'bg-stone-100'}"
+>
+	<!-- z-0 isolates Leaflet/MapLibre pane z-indexes so overlays stay clickable -->
+	<div bind:this={mapEl} class="absolute inset-0 z-0"></div>
 
 	{#if !center}
 		<div
-			class="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-stone-900/10 px-6 text-center"
+			class="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-stone-900/10 px-6 text-center"
 		>
 			<p class="rounded-lg bg-white/95 px-4 py-2 text-sm text-stone-700 shadow-sm">
 				Search for a place or click the map to select your region
 			</p>
+		</div>
+	{/if}
+
+	{#if fullscreenSupported}
+		<div class="pointer-events-none absolute inset-0 z-[1100]">
+			<button
+				type="button"
+				onclick={toggleFullscreen}
+				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+				title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+				class="pointer-events-auto absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50"
+			>
+				{#if isFullscreen}
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="h-4 w-4"
+						aria-hidden="true"
+					>
+						<path d="M8 3v3a2 2 0 0 1-2 2H3" />
+						<path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+						<path d="M3 16h3a2 2 0 0 1 2 2v3" />
+						<path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+					</svg>
+				{:else}
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="h-4 w-4"
+						aria-hidden="true"
+					>
+						<path d="M8 3H5a2 2 0 0 0-2 2v3" />
+						<path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+						<path d="M3 16v3a2 2 0 0 0 2 2h3" />
+						<path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+					</svg>
+				{/if}
+			</button>
 		</div>
 	{/if}
 </div>

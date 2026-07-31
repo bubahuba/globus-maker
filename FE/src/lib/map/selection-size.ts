@@ -2,6 +2,21 @@ import { MAX_SIDE_METERS } from '@shared/tile-constants';
 
 export const MIN_SIDE_METERS = 500;
 
+/**
+ * Nominatim reverse `zoom` from selection square size (≈ Leaflet zoom after fit).
+ * Larger squares → coarser labels (region/country); small squares → suburb/city.
+ */
+export function nominatimZoomFromSideMeters(sideMeters: number): number {
+	const m = Number(sideMeters);
+	if (!Number.isFinite(m) || m <= 2_000) return 14;
+	if (m <= 8_000) return 12;
+	if (m <= 30_000) return 10;
+	if (m <= 100_000) return 8;
+	if (m <= 500_000) return 6;
+	if (m <= 2_000_000) return 4;
+	return 2;
+}
+
 /** Log-scale slider position (0–100) for square side in meters. */
 export function sideToSlider(meters: number): number {
 	return (100 * Math.log(meters / MIN_SIDE_METERS)) / Math.log(MAX_SIDE_METERS / MIN_SIDE_METERS);

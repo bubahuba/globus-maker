@@ -1,24 +1,42 @@
 import type { JobMode, JobRequest, LatLng, TileCoord, TileManifest } from "../types";
 import {
   MAX_SIDE_METERS,
-  REF_SIDE_METERS,
-  VECTOR_TILE_MAX_ZOOM,
   clampTileZoom,
   stripeHeightPx,
   stripeWidthPx,
 } from "../../../shared/tile-constants";
+import {
+  areaCapZoom,
+  boundsPixelSize,
+  latToPixelY,
+  lngToPixelX,
+  maxFeasibleZoom,
+  pickZoom,
+  pixelToTile,
+  resolveZoom,
+  tileCountForBounds,
+  zoomSquareBounds,
+} from "../../../shared/tile-zoom";
 
 export { stripeHeightPx, stripeWidthPx };
+export {
+  areaCapZoom,
+  boundsPixelSize,
+  latToPixelY,
+  lngToPixelX,
+  maxFeasibleZoom,
+  pickZoom,
+  pixelToTile,
+  resolveZoom,
+  tileCountForBounds,
+};
 
 const TILE_SIZE = 256;
 const TARGET_PX = 4500;
-/** Cap on native tile-cover size when picking zoom (not map export max). */
-const MAX_PX = 6000;
 const MIN_SQUARE_SIDE_PX = 500;
 /** Map-mode square export edge max (may upscale beyond native tile size). */
 const MAX_SQUARE_SIDE_PX = 10000;
 const MAX_TILE_COUNT = 400;
-const METERS_PER_DEG_LAT = 111_320;
 
 export { MIN_SQUARE_SIDE_PX, MAX_SQUARE_SIDE_PX };
 
@@ -27,116 +45,7 @@ export function normalizeJobMode(mode: unknown): JobMode {
 }
 
 export function squareBounds(center: LatLng, sideMeters: number) {
-  const half = sideMeters / 2;
-  const dLat = half / METERS_PER_DEG_LAT;
-  const cosLat = Math.cos((center.lat * Math.PI) / 180);
-  const dLng = half / (METERS_PER_DEG_LAT * Math.max(cosLat, 0.01));
-
-  return {
-    north: center.lat + dLat,
-    south: center.lat - dLat,
-    east: center.lng + dLng,
-    west: center.lng - dLng,
-  };
-}
-
-export function lngToPixelX(lng: number, zoom: number): number {
-  return ((lng + 180) / 360) * TILE_SIZE * 2 ** zoom;
-}
-
-export function latToPixelY(lat: number, zoom: number): number {
-  const sin = Math.sin((lat * Math.PI) / 180);
-  const y = 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
-  return y * TILE_SIZE * 2 ** zoom;
-}
-
-export function pixelToTile(pixel: number): number {
-  return Math.floor(pixel / TILE_SIZE);
-}
-
-export function boundsPixelSize(
-  bounds: { north: number; south: number; east: number; west: number },
-  zoom: number,
-): { width: number; height: number } {
-  const x1 = lngToPixelX(bounds.west, zoom);
-  const x2 = lngToPixelX(bounds.east, zoom);
-  const y1 = latToPixelY(bounds.north, zoom);
-  const y2 = latToPixelY(bounds.south, zoom);
-  return {
-    width: Math.abs(x2 - x1),
-    height: Math.abs(y2 - y1),
-  };
-}
-
-export function tileCountForBounds(
-  bounds: { north: number; south: number; east: number; west: number },
-  zoom: number,
-): number {
-  const xMin = lngToPixelX(bounds.west, zoom);
-  const xMax = lngToPixelX(bounds.east, zoom);
-  const yMin = latToPixelY(bounds.north, zoom);
-  const yMax = latToPixelY(bounds.south, zoom);
-
-  const left = pixelToTile(Math.min(xMin, xMax));
-  const right = pixelToTile(Math.max(xMin, xMax));
-  const top = pixelToTile(Math.min(yMin, yMax));
-  const bottom = pixelToTile(Math.max(yMin, yMax));
-
-  return (right - left + 1) * (bottom - top + 1);
-}
-
-export function maxFeasibleZoom(
-  bounds: { north: number; south: number; east: number; west: number },
-): number {
-  for (let zoom = VECTOR_TILE_MAX_ZOOM; zoom >= 1; zoom--) {
-    const { width, height } = boundsPixelSize(bounds, zoom);
-    const size = Math.max(width, height);
-    if (size > MAX_PX) continue;
-    if (tileCountForBounds(bounds, zoom) <= MAX_TILE_COUNT) return zoom;
-  }
-  return 1;
-}
-
-/** Cap tile zoom by geographic extent — large areas use lower zoom levels. */
-export function areaCapZoom(sideMeters: number): number {
-  if (sideMeters <= REF_SIDE_METERS) return VECTOR_TILE_MAX_ZOOM;
-  return clampTileZoom(VECTOR_TILE_MAX_ZOOM - Math.log2(sideMeters / REF_SIDE_METERS));
-}
-
-export function pickZoom(
-  bounds: ReturnType<typeof squareBounds>,
-  targetPx = TARGET_PX,
-  sideMeters?: number,
-): number {
-  const side =
-    sideMeters ??
-    Math.max(
-      (bounds.north - bounds.south) * METERS_PER_DEG_LAT,
-      (bounds.east - bounds.west) *
-        METERS_PER_DEG_LAT *
-        Math.cos((((bounds.north + bounds.south) / 2) * Math.PI) / 180),
-    );
-  const zoomCap = areaCapZoom(side);
-
-  let bestZoom = 1;
-  let bestDiff = Number.POSITIVE_INFINITY;
-
-  for (let zoom = 1; zoom <= zoomCap; zoom++) {
-    const { width, height } = boundsPixelSize(bounds, zoom);
-    const size = Math.max(width, height);
-    if (size > MAX_PX) break;
-
-    const tiles = tileCountForBounds(bounds, zoom);
-    if (tiles > MAX_TILE_COUNT) continue;
-
-    const diff = Math.abs(size - targetPx);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestZoom = zoom;
-    }
-  }
-
-  return clampTileZoom(bestZoom);
+  return zoomSquareBounds(center, sideMeters);
 }
 
 /** Resolve the pixel target used for zoom + manifest (map squareSidePx or globe stripe height). */
@@ -223,11 +132,6 @@ export function buildTileManifest(
     outputSizePx,
     targetOutputPx: Math.max(outputSizePx, targetPx),
   };
-}
-
-export function resolveZoom(center: LatLng, sideMeters: number, targetPx: number): number {
-  const bounds = squareBounds(center, sideMeters);
-  return pickZoom(bounds, targetPx, sideMeters);
 }
 
 /** @deprecated Prefer resolveZoom(center, sideMeters, targetPx). Kept for call sites using diameter. */

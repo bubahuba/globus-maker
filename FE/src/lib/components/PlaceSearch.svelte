@@ -8,7 +8,10 @@
 
 	let { value = null, onselect }: Props = $props();
 
-	let query = $state('');
+	/** When set, input shows draft; when null, input follows parent `value`. */
+	let draft = $state<string | null>(null);
+	const display = $derived(draft ?? value?.trim() ?? '');
+
 	let results = $state<GeocodeResult[]>([]);
 	let searching = $state(false);
 	let searchError = $state<string | null>(null);
@@ -16,24 +19,19 @@
 
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
+	// Parent value changed (reverse geocode / job restore) → drop local draft.
 	$effect(() => {
-		const next = value?.trim() ?? '';
-		if (next && next !== query) {
-			query = next;
-		}
+		value;
+		draft = null;
 	});
 
-	async function runSearch(value: string) {
+	async function runSearch(searchValue: string) {
 		searching = true;
 		searchError = null;
 		try {
-			results = await searchPlaces(value);
+			results = await searchPlaces(searchValue);
 			open = results.length > 0;
-			if (results.length === 0) {
-				searchError = 'No places found';
-			} else {
-				searchError = null;
-			}
+			searchError = results.length === 0 ? 'No places found' : null;
 		} catch (error) {
 			results = [];
 			open = false;
@@ -44,22 +42,22 @@
 	}
 
 	function onInput(event: Event) {
-		const value = (event.currentTarget as HTMLInputElement).value;
-		query = value;
+		const next = (event.currentTarget as HTMLInputElement).value;
+		draft = next;
 		clearTimeout(debounceTimer);
 
-		if (value.trim().length < 2) {
+		if (next.trim().length < 2) {
 			results = [];
 			open = false;
 			searchError = null;
 			return;
 		}
 
-		debounceTimer = setTimeout(() => runSearch(value), 350);
+		debounceTimer = setTimeout(() => runSearch(next), 350);
 	}
 
 	function pickResult(result: GeocodeResult) {
-		query = result.displayName.split(',').slice(0, 2).join(', ');
+		draft = null;
 		open = false;
 		results = [];
 		onselect?.(result);
@@ -80,7 +78,7 @@
 				id="place-search"
 				type="search"
 				placeholder="City, town, address…"
-				value={query}
+				value={display}
 				oninput={onInput}
 				onfocus={() => {
 					if (results.length > 0) open = true;

@@ -355,7 +355,7 @@ app.post("/api/jobs", async (c) => {
   }
 
   const hasSourceMap = sourceMap != null;
-  if (hasSourceMap) {
+  if (sourceMap) {
     if (sourceMap.size > SOURCE_MAP_MAX_BYTES) {
       return c.json({ error: "sourceMap must be 40 MB or smaller" }, 400);
     }
@@ -769,6 +769,11 @@ app.post("/api/paypal/orders/:orderId/capture", async (c) => {
   }
 });
 
+const NOMINATIM_HEADERS = {
+  "User-Agent": "GlobusMaker/1.0 (globe stripe generator)",
+  "Accept-Language": "en",
+} as const;
+
 app.get("/api/geocode", async (c) => {
   const q = c.req.query("q")?.trim();
   if (!q || q.length < 2) {
@@ -783,10 +788,7 @@ app.get("/api/geocode", async (c) => {
   });
 
   const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-    headers: {
-      "User-Agent": "GlobusMaker/1.0 (globe stripe generator)",
-      "Accept-Language": "en",
-    },
+    headers: NOMINATIM_HEADERS,
   });
 
   if (!response.ok) {
@@ -808,6 +810,140 @@ app.get("/api/geocode", async (c) => {
       lng: Number(item.lon),
     })),
   );
+});
+
+/** Nominatim reverse `zoom` ≈ Leaflet zoom: higher → finer place (suburb/street). */
+function clampNominatimZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 10;
+  return Math.min(18, Math.max(0, Math.round(zoom)));
+}
+
+type NominatimAddress = {
+  continent?: string;
+  country?: string;
+  state?: string;
+  region?: string;
+  state_district?: string;
+  county?: string;
+  municipality?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  hamlet?: string;
+  suburb?: string;
+  city_district?: string;
+  neighbourhood?: string;
+  quarter?: string;
+  city_block?: string;
+  road?: string;
+  amenity?: string;
+  tourism?: string;
+  building?: string;
+  [key: string]: string | undefined;
+};
+
+/** Pick a short label matching the requested detail level. */
+function placeLabelFromNominatim(
+  zoom: number,
+  name: string | undefined,
+  displayName: string,
+  address?: NominatimAddress,
+): string {
+  const first = (...keys: string[]) => {
+    if (!address) return undefined;
+    for (const key of keys) {
+      const value = address[key]?.trim();
+      if (value) return value;
+    }
+    return undefined;
+  };
+
+  let label: string | undefined;
+  if (zoom >= 16) {
+    label = first("amenity", "tourism", "building", "road", "neighbourhood", "suburb", "city_block");
+  } else if (zoom >= 14) {
+    label = first("suburb", "neighbourhood", "quarter", "city_district", "city_block");
+  } else if (zoom >= 12) {
+    label = first("city_district", "suburb", "town", "village", "hamlet", "city", "municipality");
+  } else if (zoom >= 10) {
+    label = first("city", "town", "village", "hamlet", "municipality");
+  } else if (zoom >= 7) {
+    label = first("county", "state_district", "municipality");
+  } else if (zoom >= 4) {
+    label = first("state", "region", "state_district");
+  } else {
+    label = first("country", "continent");
+  }
+
+  if (!label) {
+    label =
+      name?.trim() ||
+      first(
+        "suburb",
+        "neighbourhood",
+        "city",
+        "town",
+        "village",
+        "municipality",
+        "county",
+        "state",
+        "country",
+      ) ||
+      displayName.split(",")[0]?.trim() ||
+      displayName;
+  }
+  return label;
+}
+
+app.get("/api/reverse-geocode", async (c) => {
+  const lat = Number(c.req.query("lat"));
+  const lng = Number(c.req.query("lng"));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return c.json({ error: "Invalid coordinates" }, 400);
+  }
+
+  const zoomParam = c.req.query("zoom");
+  const zoom = clampNominatimZoom(zoomParam != null && zoomParam !== "" ? Number(zoomParam) : 10);
+
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lng),
+    format: "json",
+    zoom: String(zoom),
+    addressdetails: "1",
+  });
+
+  const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+    headers: NOMINATIM_HEADERS,
+  });
+
+  if (!response.ok) {
+    return c.json({ error: "Geocoding service unavailable" }, 502);
+  }
+
+  const result = (await response.json()) as {
+    place_id?: number;
+    name?: string;
+    display_name?: string;
+    lat?: string;
+    lon?: string;
+    address?: NominatimAddress;
+    error?: string;
+  };
+
+  if (result.error || !result.display_name || result.lat == null || result.lon == null) {
+    return c.json(null);
+  }
+
+  const label = placeLabelFromNominatim(zoom, result.name, result.display_name, result.address);
+
+  return c.json({
+    placeId: result.place_id ?? 0,
+    displayName: result.display_name,
+    label,
+    lat: Number(result.lat),
+    lng: Number(result.lon),
+  });
 });
 
 app.post("/api/estimate", async (c) => {
