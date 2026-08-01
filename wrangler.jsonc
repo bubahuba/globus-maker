@@ -33,7 +33,7 @@
     }
   ],
   "vars": {
-    "PROCESSOR_URL": "https://globus-processor-9bd2d.containers.snapdeploy.app",
+    "PROCESSOR_URL": "https://globus-processor.rascasone.dev",
     "PAYPAL_MODE": "live",
     "PAYPAL_CURRENCY": "EUR"
   }
