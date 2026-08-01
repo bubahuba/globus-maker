@@ -1,4 +1,6 @@
 PROCESSOR_URL=http://localhost:8080
+# Must be reachable by the processor so it can PUT preview files + zip.
+# Local Docker processor → host.docker.internal; remote processor → public API URL.
 API_CALLBACK_ORIGIN=http://host.docker.internal:8787
 
 # PayPal Checkout (sandbox) — copy values from `.env`

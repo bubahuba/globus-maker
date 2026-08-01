@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { env } from '$env/dynamic/public';
 	import {
+		DEFAULT_SITE_ORIGIN,
 		SITE_NAME,
 		absoluteUrl,
 		type OgImage
@@ -21,8 +22,13 @@
 		type = 'website'
 	}: Props = $props();
 
+	/** Build/prerender: kit.prerender.origin (prod host). Dev: current origin. Optional PUBLIC_SITE_ORIGIN overrides. */
 	const origin = $derived(
-		(env.PUBLIC_SITE_ORIGIN?.replace(/\/$/, '') || page.url.origin).replace(/\/$/, '')
+		(
+			env.PUBLIC_SITE_ORIGIN?.replace(/\/$/, '') ||
+			page.url.origin.replace(/\/$/, '') ||
+			DEFAULT_SITE_ORIGIN
+		).replace(/\/$/, '')
 	);
 	const canonical = $derived(absoluteUrl(origin, page.url.pathname || '/'));
 </script>

@@ -1,5 +1,8 @@
 import adapter from '@sveltejs/adapter-static';
 
+/** Keep in sync with `DEFAULT_SITE_ORIGIN` in `src/lib/seo.ts`. */
+const DEFAULT_SITE_ORIGIN = 'https://globus-maker.shadow-hub.workers.dev';
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	compilerOptions: {
@@ -11,10 +14,10 @@ const config = {
 			'@lib': 'src/lib',
 			'@shared': '../shared'
 		},
-		// Absolute og:url / og:image need a real origin during prerender.
-		// Set PUBLIC_SITE_ORIGIN (e.g. https://your-worker.example) before `npm run build`.
+		// Absolute og:url / og:image are baked in at prerender time.
+		// Override with PUBLIC_SITE_ORIGIN when building for a different host.
 		prerender: {
-			origin: process.env.PUBLIC_SITE_ORIGIN || 'http://localhost:5173'
+			origin: process.env.PUBLIC_SITE_ORIGIN || DEFAULT_SITE_ORIGIN
 		},
 		adapter: adapter({
 			pages: 'build',

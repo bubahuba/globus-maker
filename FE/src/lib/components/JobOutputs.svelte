@@ -1,13 +1,8 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import { jobFileUrl } from '@lib/api/jobs';
+	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
 	import type { JobMode, JobStatus, OutputFormat } from '@lib/types';
 	import { formatStripePrintSizeCm } from '@shared/tile-constants';
-
-	/** Three.js viewer — client-only dynamic import so SSR/prerender stays clean. */
-	const DistortedPanoramaViewer = browser
-		? import('@lib/components/DistortedPanoramaViewer.svelte').then((m) => m.default)
-		: null;
 
 	interface Props {
 		jobId: string | null;
@@ -69,6 +64,8 @@
 		const lower = files.map((f) => f.toLowerCase());
 		const jpgName = lower.find((f) => f === 'input.jpg' || f === 'input.jpeg');
 		const hasUploadedSource = lower.some((f) => f.startsWith('source-map.'));
+		// If the expected format is missing but the other map file exists (e.g. zip
+		// hydrate brought input.jpg while UI still expected svg), show what's available.
 		const mapFile = jpgName
 			? (files.find((f) => f.toLowerCase() === jpgName) ?? jpgName)
 			: lower.includes('input.svg')
@@ -78,7 +75,12 @@
 					: effectiveMode === 'globe' || outputFormat === 'svg'
 						? 'input.svg'
 						: 'input.jpg';
-		return [{ filename: mapFile, label: effectiveMode === 'globe' ? 'Your square map' : 'Stitched map' }] as const;
+		return [
+			{
+				filename: mapFile,
+				label: effectiveMode === 'globe' ? 'Your square map' : 'Stitched map'
+			}
+		] as const;
 	});
 
 	const readyMaps = $derived.by(() => {
@@ -287,11 +289,13 @@
 										activePlaceholder.filename === slot.filename
 								)} flex h-[min(40vh,20rem)] items-center justify-center rounded-lg text-sm text-stone-400 ring-1 ring-stone-200"
 								role="status"
-								aria-label="Waiting for map"
+								aria-label={status === 'complete' ? 'Map preview unavailable' : 'Waiting for map'}
 								aria-busy={activePlaceholder?.kind === 'map' &&
 									activePlaceholder.filename === slot.filename}
 							>
-								<span class="relative z-10">Waiting…</span>
+								<span class="relative z-10">
+									{status === 'complete' ? 'Preview unavailable' : 'Waiting…'}
+								</span>
 							</div>
 						{/if}
 					</div>
@@ -306,18 +310,14 @@
 							A rough idea of how your map wraps around a ball. The place you picked sits at the
 							top.
 						</p>
-						{#if DistortedPanoramaViewer}
-							{#await DistortedPanoramaViewer then Viewer}
-								<Viewer
-									src={jobFileUrl(
-										jobId,
-										spherePreviewFile,
-										sphereRevision ?? revision ?? undefined
-									)}
-									backgroundColor={emptyFillColor ?? undefined}
-								/>
-							{/await}
-						{/if}
+						<DistortedPanoramaViewer
+							src={jobFileUrl(
+								jobId,
+								spherePreviewFile,
+								sphereRevision ?? revision ?? undefined
+							)}
+							backgroundColor={emptyFillColor ?? undefined}
+						/>
 					</div>
 				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 					<div class="space-y-2">

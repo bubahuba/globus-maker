@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { onDestroy } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -175,9 +176,12 @@
 	}
 
 	$effect(() => {
+		if (!browser) return;
+
 		const el = container;
 		const key = loadKey;
-		if (!el || !key) return;
+		const url = src;
+		if (!el || !key || !url) return;
 		if (key === loadedKey && renderer) return;
 
 		loadedKey = key;
@@ -186,7 +190,8 @@
 
 		void (async () => {
 			try {
-				await mountGlobe(el, key);
+				// Load with full URL (incl. ?v= cache-bust); key only dedupes remounts.
+				await mountGlobe(el, url);
 				if (cancelled) disposeViewer();
 			} catch (err) {
 				if (cancelled) return;

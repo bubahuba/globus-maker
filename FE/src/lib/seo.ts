@@ -2,8 +2,14 @@
 
 export const SITE_NAME = 'Globus Maker';
 
+/**
+ * Canonical public origin baked into prerendered HTML for og:url / og:image.
+ * Override with PUBLIC_SITE_ORIGIN at build time (FE/.env or the build env).
+ */
+export const DEFAULT_SITE_ORIGIN = 'https://globus-maker.shadow-hub.workers.dev';
+
 export type OgImage = {
-	/** Path under the site root, e.g. `/about/….png`. */
+	/** Path under the site root, e.g. `/about/….webp`. */
 	path: string;
 	alt: string;
 	width: number;
@@ -11,40 +17,45 @@ export type OgImage = {
 	type?: string;
 };
 
-const PNG = {
-	width: 1536,
-	height: 1024,
-	type: 'image/png'
+/** 1280w WebP about assets — small enough for social crawlers (PNG sources are 2MB+). */
+const WEBP_1280 = {
+	width: 1280,
+	height: 853,
+	type: 'image/webp'
 } as const;
 
 /** Map-mode framed print — primary share image for the app. */
 export const OG_IMAGE_MAP: OgImage = {
-	path: '/about/map-mode-framed-wall-normal.png',
+	path: '/about/map-mode-framed-wall-normal-1280.webp',
 	alt: 'Framed city map print on a living-room wall',
-	...PNG
+	...WEBP_1280
 };
 
 /** Globe sphere lamp — second share image for the app. */
 export const OG_IMAGE_GLOBE: OgImage = {
-	path: '/about/sphere-lamp-map-projection-hero.png',
+	path: '/about/sphere-lamp-map-projection-hero-1280.webp',
 	alt: 'City map sphere lamp projecting soft map light in a living room',
-	...PNG
+	...WEBP_1280
 };
 
 export const OG_IMAGE_MAP_LIT: OgImage = {
-	path: '/about/map-mode-framed-wall-enlighted.png',
+	path: '/about/map-mode-framed-wall-enlighted-1280.webp',
 	alt: 'Backlit framed city map glowing on a living-room wall',
-	...PNG
+	...WEBP_1280
 };
 
 export const OG_IMAGE_GLOBE_ARTISTIC: OgImage = {
-	path: '/about/globe-mode-artistic-sphere-hero.png',
+	path: '/about/globe-mode-artistic-sphere-hero-1280.webp',
 	alt: 'Sphere lamp with violet, neon yellow, and fuchsia city map wrap',
-	...PNG
+	...WEBP_1280
 };
 
-/** Home / default social preview images (map + globe). */
-export const HOME_OG_IMAGES: readonly OgImage[] = [OG_IMAGE_GLOBE_ARTISTIC, OG_IMAGE_MAP_LIT, OG_IMAGE_GLOBE];
+/** Home / default social preview images. */
+export const HOME_OG_IMAGES: readonly OgImage[] = [
+	OG_IMAGE_GLOBE_ARTISTIC,
+	OG_IMAGE_MAP_LIT,
+	OG_IMAGE_GLOBE
+];
 
 /** About page social preview — map, globe, and artistic variants. */
 export const ABOUT_OG_IMAGES: readonly OgImage[] = [

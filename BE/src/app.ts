@@ -47,6 +47,7 @@ import {
   normalizeGlobeDownloadFormat,
 } from "./jobs/filename";
 import { buildGlobeStripesPdf } from "./jobs/globe-pdf";
+import { hydratePreviewFilesFromZip } from "./jobs/hydrate-previews";
 import { captureGlobeDownloadOrder, createGlobeDownloadOrder } from "./paypal/client";
 import { publicPaypalConfig } from "./paypal/config";
 
@@ -311,6 +312,9 @@ async function runJob(
       }
     }
 
+    // Recover previews when mid-job PUTs never reached this API (bad callback origin).
+    await hydratePreviewFilesFromZip(env.ARTIFACTS, job.id, zipBytes);
+
     await updateJobProgress(env.ARTIFACTS, job.id, {
       status: "complete",
       progress: 100,
@@ -550,6 +554,7 @@ app.put("/api/jobs/:id/zip", async (c) => {
   }
 
   await putArtifact(c.env.ARTIFACTS, `jobs/${jobId}/stripes.zip`, bytes, "application/zip");
+  await hydratePreviewFilesFromZip(c.env.ARTIFACTS, jobId, bytes);
 
   const mode = normalizeJobMode(job.request.mode);
   await updateJobProgress(c.env.ARTIFACTS, jobId, {
