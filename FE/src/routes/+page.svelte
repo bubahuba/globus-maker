@@ -41,6 +41,8 @@
 		stripeHeightPx,
 		stripeWidthPx
 	} from '@shared/tile-constants';
+	import SeoHead from '@lib/components/SeoHead.svelte';
+	import { HOME_DESCRIPTION, HOME_OG_IMAGES, SITE_NAME } from '@lib/seo';
 	const MIN_SQUARE_SIDE_PX = 500;
 	const MAX_SQUARE_SIDE_PX = 10000;
 	const DEFAULT_SQUARE_SIDE_PX = 4000;
@@ -557,13 +559,7 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Globus Maker</title>
-	<meta
-		name="description"
-		content="Make a square city map or globe meridian stripes from any place on OpenStreetMap or upload own map."
-	/>
-</svelte:head>
+<SeoHead title={SITE_NAME} description={HOME_DESCRIPTION} images={HOME_OG_IMAGES} />
 <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8">
 	<header class="space-y-2">
 		<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Globus Maker</p>

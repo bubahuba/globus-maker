@@ -1,5 +1,7 @@
 <script lang="ts">
 	import AboutImageLightbox from '@lib/components/AboutImageLightbox.svelte';
+	import SeoHead from '@lib/components/SeoHead.svelte';
+	import { ABOUT_DESCRIPTION, ABOUT_OG_IMAGES, SITE_NAME } from '@lib/seo';
 
 	type AboutImage = {
 		slug: string;
@@ -97,13 +99,11 @@
 	}
 </script>
 
-<svelte:head>
-	<title>About · Globus Maker</title>
-	<meta
-		name="description"
-		content="Make a square city map or globe meridian stripes from any place on OpenStreetMap."
-	/>
-</svelte:head>
+<SeoHead
+	title={`About · ${SITE_NAME}`}
+	description={ABOUT_DESCRIPTION}
+	images={ABOUT_OG_IMAGES}
+/>
 
 <main class="mx-auto max-w-6xl px-4 py-10 sm:py-14">
 	<header class="max-w-2xl space-y-3">

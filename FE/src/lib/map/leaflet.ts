@@ -34,7 +34,7 @@ export function squareBounds(center: { lat: number; lng: number }, sideMeters: n
 	);
 }
 
-type MaplibreGlLayer = L.Layer & {
+export type MaplibreGlLayer = L.Layer & {
 	getMaplibreMap: () => import('maplibre-gl').Map;
 };
 

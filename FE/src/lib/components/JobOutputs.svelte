@@ -1,8 +1,13 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { jobFileUrl } from '@lib/api/jobs';
-	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
 	import type { JobMode, JobStatus, OutputFormat } from '@lib/types';
 	import { formatStripePrintSizeCm } from '@shared/tile-constants';
+
+	/** Three.js viewer — client-only dynamic import so SSR/prerender stays clean. */
+	const DistortedPanoramaViewer = browser
+		? import('@lib/components/DistortedPanoramaViewer.svelte').then((m) => m.default)
+		: null;
 
 	interface Props {
 		jobId: string | null;
@@ -301,10 +306,18 @@
 							A rough idea of how your map wraps around a ball. The place you picked sits at the
 							top.
 						</p>
-						<DistortedPanoramaViewer
-							src={jobFileUrl(jobId, spherePreviewFile, sphereRevision ?? revision ?? undefined)}
-							backgroundColor={emptyFillColor ?? undefined}
-						/>
+						{#if DistortedPanoramaViewer}
+							{#await DistortedPanoramaViewer then Viewer}
+								<Viewer
+									src={jobFileUrl(
+										jobId,
+										spherePreviewFile,
+										sphereRevision ?? revision ?? undefined
+									)}
+									backgroundColor={emptyFillColor ?? undefined}
+								/>
+							{/await}
+						{/if}
 					</div>
 				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 					<div class="space-y-2">

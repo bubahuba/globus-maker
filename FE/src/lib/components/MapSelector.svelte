@@ -1,20 +1,14 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import {
-		createCenterMarker,
-		createSquareLayer,
-		fitSelectionInView,
-		initMap,
-		squareBounds,
-		updateMapStyle,
-		type MapSelection
-	} from '@lib/map/leaflet';
+	import type { MaplibreGlLayer, MapSelection } from '@lib/map/leaflet';
 	import {
 		adjustSideMetersBySliderStep,
 		adjustSideMetersFromWheel,
 		sideToSlider
 	} from '@lib/map/selection-size';
 	import { MAP_LAYER_KEYS, type MapLayerStyle } from '@shared/map-style';
+	import leafletCss from 'leaflet/dist/leaflet.css?url';
+	import maplibreCss from 'maplibre-gl/dist/maplibre-gl.css?url';
 
 	interface Props {
 		center?: { lat: number; lng: number } | null;
@@ -33,7 +27,7 @@
 	let rootEl: HTMLDivElement | undefined = $state();
 	let mapEl: HTMLDivElement | undefined = $state();
 	let map: import('leaflet').Map | undefined = $state();
-	let baseLayer: ReturnType<typeof initMap>['baseLayer'] | undefined = $state();
+	let baseLayer: MaplibreGlLayer | undefined = $state();
 	let square: import('leaflet').Rectangle | undefined;
 	let marker: import('leaflet').Marker | undefined;
 	/** Skip re-fitting while the user drags the center marker. */
@@ -41,6 +35,9 @@
 	let isFullscreen = $state(false);
 	/** Assume supported; hide only if the API is clearly missing after mount. */
 	let fullscreenSupported = $state(true);
+
+	/** Leaflet helpers — loaded only in the browser (Leaflet touches `window` at import). */
+	let leaflet: typeof import('@lib/map/leaflet') | undefined;
 
 	function selectionCenter(): { lat: number; lng: number } | null {
 		if (marker) {
@@ -51,10 +48,10 @@
 	}
 
 	function frameSelection(animate: boolean) {
-		if (!map || draggingMarker) return;
+		if (!map || !leaflet || draggingMarker) return;
 		const c = selectionCenter();
 		if (!c) return;
-		fitSelectionInView(map, c, sideMeters, { animate });
+		leaflet.fitSelectionInView(map, c, sideMeters, { animate });
 	}
 
 	/**
@@ -62,10 +59,10 @@
 	 *   onchange (echoing was overwriting a new search pick with the old pin).
 	 */
 	function setCenterAt(lat: number, lng: number, fly = true, emit = true) {
-		if (!map) return;
+		if (!map || !leaflet) return;
 
 		if (!marker) {
-			marker = createCenterMarker({ lat, lng });
+			marker = leaflet.createCenterMarker({ lat, lng });
 			marker.addTo(map);
 			marker.on('dragstart', () => {
 				draggingMarker = true;
@@ -96,13 +93,13 @@
 	}
 
 	function updateSquare(emit = true) {
-		if (!map || !marker) return;
+		if (!map || !marker || !leaflet) return;
 		const latlng = marker.getLatLng();
-		const bounds = squareBounds({ lat: latlng.lat, lng: latlng.lng }, sideMeters);
+		const bounds = leaflet.squareBounds({ lat: latlng.lat, lng: latlng.lng }, sideMeters);
 		if (square) {
 			square.setBounds(bounds);
 		} else {
-			square = createSquareLayer(bounds);
+			square = leaflet.createSquareLayer(bounds);
 			square.addTo(map);
 		}
 		if (emit) emitChange();
@@ -152,6 +149,10 @@
 	onMount(() => {
 		if (!mapEl) return;
 		const el = mapEl;
+		let disposed = false;
+		let onWheel: ((event: WheelEvent) => void) | undefined;
+		let ro: ResizeObserver | undefined;
+		let mapInstance: import('leaflet').Map | undefined;
 
 		fullscreenSupported =
 			!!document.fullscreenEnabled &&
@@ -159,40 +160,58 @@
 		document.addEventListener('fullscreenchange', syncFullscreenState);
 		syncFullscreenState();
 
-		const initialized = initMap(el, center, mapLayers);
-		map = initialized.map;
-		baseLayer = initialized.baseLayer;
-		if (center) setCenterAt(center.lat, center.lng, false, false);
+		void (async () => {
+			const api = await import('@lib/map/leaflet');
+			if (disposed) return;
+			leaflet = api;
 
-		map.on('click', (event) => {
-			setCenterAt(event.latlng.lat, event.latlng.lng, true, true);
-		});
+			const initialized = api.initMap(el, center, mapLayers);
+			if (disposed) {
+				initialized.map.remove();
+				return;
+			}
+			mapInstance = initialized.map;
+			map = initialized.map;
+			baseLayer = initialized.baseLayer;
+			if (center) setCenterAt(center.lat, center.lng, false, false);
 
-		const onWheel = (event: WheelEvent) => {
-			event.preventDefault();
-			const next = adjustSideMetersFromWheel(sideMeters, event.deltaY);
-			if (next === sideMeters) return;
-			sideMeters = next;
-			updateSquare();
-			frameSelection(false);
-		};
-		el.addEventListener('wheel', onWheel, { passive: false });
+			map.on('click', (event) => {
+				setCenterAt(event.latlng.lat, event.latlng.lng, true, true);
+			});
 
-		const resizeMap = () => {
-			map?.invalidateSize();
-			baseLayer?.getMaplibreMap().resize();
-			// Do not re-fit here — it fights free pan and stalls MapLibre tile loads.
-		};
-		requestAnimationFrame(resizeMap);
+			onWheel = (event: WheelEvent) => {
+				event.preventDefault();
+				const next = adjustSideMetersFromWheel(sideMeters, event.deltaY);
+				if (next === sideMeters) return;
+				sideMeters = next;
+				updateSquare();
+				frameSelection(false);
+			};
+			el.addEventListener('wheel', onWheel, { passive: false });
 
-		const ro = new ResizeObserver(() => resizeMap());
-		ro.observe(el);
+			const resizeMap = () => {
+				map?.invalidateSize();
+				baseLayer?.getMaplibreMap().resize();
+				// Do not re-fit here — it fights free pan and stalls MapLibre tile loads.
+			};
+			requestAnimationFrame(resizeMap);
+
+			ro = new ResizeObserver(() => resizeMap());
+			ro.observe(el);
+
+			if (disposed) {
+				el.removeEventListener('wheel', onWheel);
+				ro.disconnect();
+				mapInstance.remove();
+			}
+		})();
 
 		return () => {
+			disposed = true;
 			document.removeEventListener('fullscreenchange', syncFullscreenState);
-			el.removeEventListener('wheel', onWheel);
-			ro.disconnect();
-			map?.remove();
+			if (onWheel) el.removeEventListener('wheel', onWheel);
+			ro?.disconnect();
+			mapInstance?.remove();
 		};
 	});
 
@@ -212,7 +231,7 @@
 			mapLayers[key].enabled;
 			mapLayers[key].color;
 		}
-		if (baseLayer) updateMapStyle(baseLayer, mapLayers);
+		if (baseLayer && leaflet) leaflet.updateMapStyle(baseLayer, mapLayers);
 	});
 
 	$effect(() => {
@@ -237,6 +256,11 @@
 		}
 	});
 </script>
+
+<svelte:head>
+	<link rel="stylesheet" href={leafletCss} />
+	<link rel="stylesheet" href={maplibreCss} />
+</svelte:head>
 
 <div
 	bind:this={rootEl}
