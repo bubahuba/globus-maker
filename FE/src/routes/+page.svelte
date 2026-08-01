@@ -122,6 +122,7 @@
 	let uploadedMapFile = $state<File | null>(null);
 	let uploadedMapUrl = $state<string | null>(null);
 	let uploadFileInput: HTMLInputElement | undefined = $state();
+	let jobSectionEl: HTMLElement | undefined = $state();
 
 	/** Bumps to abort an in-flight poll when switching jobs. */
 	let pollEpoch = 0;
@@ -276,7 +277,7 @@
 
 	async function scrollToJobSection() {
 		await tick();
-		document.getElementById('job-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		jobSectionEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
 	async function scrollToJobOutputs() {
@@ -599,34 +600,36 @@
 				{/if}
 
 				{#if jobStatus && jobManifest}
-					<JobCard
-						{jobId}
-						status={jobStatus}
-						progress={jobProgress}
-						manifest={jobManifest}
-						mode={jobMode ?? mode}
-						stripeCount={(jobMode ?? mode) === 'globe' ? stripes : 0}
-						error={jobError}
-						stepCurrent={jobStepCurrent}
-						stepTotal={jobStepTotal}
-						stepUnit={jobStepUnit}
-						queuePosition={jobQueuePosition}
-						queueLength={jobQueueLength}
-						{downloadFilename}
-						{globeDownloadFormat}
-						diameterCm={(jobMode ?? mode) === 'globe' ? diameterCm : undefined}
-						{artifactsAvailable}
-						paid={jobPaid}
-						onpaid={() => {
-							jobPaid = true;
-						}}
-						ondownloaded={() => {
-							artifactsAvailable = false;
-							jobPaid = false;
-							jobFiles = [];
-							downloadFilename = null;
-						}}
-					/>
+					<div bind:this={jobSectionEl}>
+						<JobCard
+							{jobId}
+							status={jobStatus}
+							progress={jobProgress}
+							manifest={jobManifest}
+							mode={jobMode ?? mode}
+							stripeCount={(jobMode ?? mode) === 'globe' ? stripes : 0}
+							error={jobError}
+							stepCurrent={jobStepCurrent}
+							stepTotal={jobStepTotal}
+							stepUnit={jobStepUnit}
+							queuePosition={jobQueuePosition}
+							queueLength={jobQueueLength}
+							{downloadFilename}
+							{globeDownloadFormat}
+							diameterCm={(jobMode ?? mode) === 'globe' ? diameterCm : undefined}
+							{artifactsAvailable}
+							paid={jobPaid}
+							onpaid={() => {
+								jobPaid = true;
+							}}
+							ondownloaded={() => {
+								artifactsAvailable = false;
+								jobPaid = false;
+								jobFiles = [];
+								downloadFilename = null;
+							}}
+						/>
+					</div>
 				{/if}
 			</section>
 		</div>
