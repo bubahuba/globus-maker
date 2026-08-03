@@ -396,7 +396,7 @@
 										<div
 											class="{placeholderClass(
 												stripeActive
-											)} flex h-[min(40vw,500px)] w-full items-center justify-center rounded-md text-stone-400 ring-1 ring-stone-200"
+											)} flex h-[min(40vw,460px)] w-full items-center justify-center rounded-md text-stone-400 ring-1 ring-stone-200"
 											role="status"
 											aria-label="Waiting for stripe"
 											aria-busy={stripeActive}
