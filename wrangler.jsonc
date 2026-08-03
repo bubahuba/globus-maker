@@ -34,7 +34,8 @@
   ],
   "vars": {
     "PROCESSOR_URL": "https://globus-processor.rascasone.dev",
-    "PUBLIC_SITE_ORIGIN": "https://globus-maker.shadow-hub.workers.dev",
+//    "PUBLIC_SITE_ORIGIN": "https://globus-maker.shadow-hub.workers.dev",
+    "PUBLIC_SITE_ORIGIN": "https://globe.rgb.sk",
     "PAYPAL_MODE": "live",
     "PAYPAL_CURRENCY": "EUR"
   }
