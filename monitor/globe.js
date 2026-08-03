@@ -108,17 +108,21 @@ function disposeViewer() {
 	}
 }
 
+function hexToRgba(hex, alpha = 255) {
+	const c = parseHex(hex);
+	if (!c) return [128, 128, 128, alpha];
+	return [c.r, c.g, c.b, alpha];
+}
+
+/** Bilinear sample, or null when outside the square (IM `-virtual-pixel Background`). */
 function sampleBilinear(data, width, height, x, y) {
-	if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1) {
-		const ix = Math.max(0, Math.min(width - 1, Math.round(x)));
-		const iy = Math.max(0, Math.min(height - 1, Math.round(y)));
-		const i = (iy * width + ix) * 4;
-		return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+	if (x < 0 || y < 0 || x > width - 1 || y > height - 1) {
+		return null;
 	}
 	const x0 = Math.floor(x);
 	const y0 = Math.floor(y);
-	const x1 = x0 + 1;
-	const y1 = y0 + 1;
+	const x1 = Math.min(width - 1, x0 + 1);
+	const y1 = Math.min(height - 1, y0 + 1);
 	const fx = x - x0;
 	const fy = y - y0;
 	const idx = (ix, iy) => (iy * width + ix) * 4;
@@ -136,18 +140,20 @@ function sampleBilinear(data, width, height, x, y) {
 }
 
 /**
- * ImageMagick-style DePolar: square map centre → north (top of equirect),
- * rim → south (bottom). Matches processor `build_depolar_sphere_preview`.
+ * ImageMagick-style DePolar (`-distort DePolar -1` + virtual-pixel Background):
+ * centre → north (equirect top); radius to furthest corner → south.
+ * Outside the square → empty fill — four south-pole sectors like the FE preview.
  */
-function depolarSquareToEquirect(srcCanvas, maxEdge) {
+function depolarSquareToEquirect(srcCanvas, maxEdge, emptyFillColor) {
 	const sw = srcCanvas.width;
 	const sh = srcCanvas.height;
-	const size = Math.min(sw, sh);
 	const cx = sw / 2;
 	const cy = sh / 2;
-	const maxR = size / 2;
+	// IM `-1`: radius is centre → furthest corner (covers whole square).
+	const maxR = Math.hypot(cx, cy);
+	const empty = hexToRgba(emptyFillColor || '#808080');
 
-	let outW = Math.min(maxEdge, Math.max(2, size * 2));
+	let outW = Math.min(maxEdge, Math.max(2, Math.round(maxR * 2)));
 	if (outW % 2) outW -= 1;
 	const outH = Math.max(1, outW >> 1);
 
@@ -164,14 +170,15 @@ function depolarSquareToEquirect(srcCanvas, maxEdge) {
 	const dest = outImg.data;
 
 	for (let y = 0; y < outH; y++) {
-		// Top row = centre (north pole); bottom = outer rim (south).
+		// Top row = centre (north pole); bottom = corner radius (south).
 		const r = (y / Math.max(1, outH - 1)) * maxR;
 		for (let x = 0; x < outW; x++) {
 			// IM DePolar: mid top row is angle 0; angles increase clockwise.
 			const angle = (x / outW - 0.5) * Math.PI * 2;
 			const sx = cx + r * Math.sin(angle);
 			const sy = cy - r * Math.cos(angle);
-			const [cr, cg, cb, ca] = sampleBilinear(src, sw, sh, sx, sy);
+			const sampled = sampleBilinear(src, sw, sh, sx, sy);
+			const [cr, cg, cb, ca] = sampled ?? empty;
 			const i = (y * outW + x) * 4;
 			dest[i] = cr;
 			dest[i + 1] = cg;
@@ -188,7 +195,7 @@ function needsDepolar(width, height) {
 	return width / height < 1.5;
 }
 
-async function loadTexture(url, { depolarSquare = false } = {}) {
+async function loadTexture(url, { depolarSquare = false, emptyFillColor = '#808080' } = {}) {
 	const img = new Image();
 	img.crossOrigin = 'anonymous';
 	img.decoding = 'async';
@@ -211,7 +218,9 @@ async function loadTexture(url, { depolarSquare = false } = {}) {
 	ctx.drawImage(img, 0, 0, w, h);
 
 	const mapped =
-		depolarSquare || needsDepolar(w, h) ? depolarSquareToEquirect(canvas, MAX_EDGE) : canvas;
+		depolarSquare || needsDepolar(w, h)
+			? depolarSquareToEquirect(canvas, MAX_EDGE, emptyFillColor)
+			: canvas;
 
 	const texture = new THREE.CanvasTexture(mapped);
 	texture.colorSpace = THREE.SRGBColorSpace;
@@ -219,11 +228,11 @@ async function loadTexture(url, { depolarSquare = false } = {}) {
 	return texture;
 }
 
-async function mountGlobe(el, url, { depolarSquare = false } = {}) {
+async function mountGlobe(el, url, opts = {}) {
 	disposeViewer();
 	el.replaceChildren();
 
-	const texture = await loadTexture(url, { depolarSquare });
+	const texture = await loadTexture(url, opts);
 
 	const scene = new THREE.Scene();
 	scene.background = null;
@@ -302,8 +311,12 @@ async function refresh() {
 
 		if (!container) throw new Error('Missing #globe container');
 		setStatus('Loading preview…');
-		// Fallback / square maps: DePolar centre→north like the FE globe pipeline.
-		await mountGlobe(container, previewUrl, { depolarSquare: job.fallback === true });
+		// Fallback / square maps: DePolar centre→north like the FE globe pipeline
+		// (corner radius + empty fill → four untextured south-pole sectors).
+		await mountGlobe(container, previewUrl, {
+			depolarSquare: job.fallback === true,
+			emptyFillColor: job.emptyFillColor || '#808080'
+		});
 		loadedPreviewUrl = previewUrl;
 		setStatus('');
 
