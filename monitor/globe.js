@@ -108,7 +108,87 @@ function disposeViewer() {
 	}
 }
 
-async function loadTexture(url) {
+function sampleBilinear(data, width, height, x, y) {
+	if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1) {
+		const ix = Math.max(0, Math.min(width - 1, Math.round(x)));
+		const iy = Math.max(0, Math.min(height - 1, Math.round(y)));
+		const i = (iy * width + ix) * 4;
+		return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+	}
+	const x0 = Math.floor(x);
+	const y0 = Math.floor(y);
+	const x1 = x0 + 1;
+	const y1 = y0 + 1;
+	const fx = x - x0;
+	const fy = y - y0;
+	const idx = (ix, iy) => (iy * width + ix) * 4;
+	const out = [0, 0, 0, 0];
+	for (let c = 0; c < 4; c++) {
+		const v00 = data[idx(x0, y0) + c];
+		const v10 = data[idx(x1, y0) + c];
+		const v01 = data[idx(x0, y1) + c];
+		const v11 = data[idx(x1, y1) + c];
+		out[c] = Math.round(
+			v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy
+		);
+	}
+	return out;
+}
+
+/**
+ * ImageMagick-style DePolar: square map centre → north (top of equirect),
+ * rim → south (bottom). Matches processor `build_depolar_sphere_preview`.
+ */
+function depolarSquareToEquirect(srcCanvas, maxEdge) {
+	const sw = srcCanvas.width;
+	const sh = srcCanvas.height;
+	const size = Math.min(sw, sh);
+	const cx = sw / 2;
+	const cy = sh / 2;
+	const maxR = size / 2;
+
+	let outW = Math.min(maxEdge, Math.max(2, size * 2));
+	if (outW % 2) outW -= 1;
+	const outH = Math.max(1, outW >> 1);
+
+	const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+	if (!srcCtx) throw new Error('Canvas unavailable');
+	const src = srcCtx.getImageData(0, 0, sw, sh).data;
+
+	const out = document.createElement('canvas');
+	out.width = outW;
+	out.height = outH;
+	const outCtx = out.getContext('2d');
+	if (!outCtx) throw new Error('Canvas unavailable');
+	const outImg = outCtx.createImageData(outW, outH);
+	const dest = outImg.data;
+
+	for (let y = 0; y < outH; y++) {
+		// Top row = centre (north pole); bottom = outer rim (south).
+		const r = (y / Math.max(1, outH - 1)) * maxR;
+		for (let x = 0; x < outW; x++) {
+			// IM DePolar: mid top row is angle 0; angles increase clockwise.
+			const angle = (x / outW - 0.5) * Math.PI * 2;
+			const sx = cx + r * Math.sin(angle);
+			const sy = cy - r * Math.cos(angle);
+			const [cr, cg, cb, ca] = sampleBilinear(src, sw, sh, sx, sy);
+			const i = (y * outW + x) * 4;
+			dest[i] = cr;
+			dest[i + 1] = cg;
+			dest[i + 2] = cb;
+			dest[i + 3] = ca;
+		}
+	}
+	outCtx.putImageData(outImg, 0, 0);
+	return out;
+}
+
+/** ~2:1 already equirect (API preview); ~1:1 is a polar square map (needs DePolar). */
+function needsDepolar(width, height) {
+	return width / height < 1.5;
+}
+
+async function loadTexture(url, { depolarSquare = false } = {}) {
 	const img = new Image();
 	img.crossOrigin = 'anonymous';
 	img.decoding = 'async';
@@ -130,17 +210,20 @@ async function loadTexture(url) {
 	if (!ctx) throw new Error('Canvas unavailable');
 	ctx.drawImage(img, 0, 0, w, h);
 
-	const texture = new THREE.CanvasTexture(canvas);
+	const mapped =
+		depolarSquare || needsDepolar(w, h) ? depolarSquareToEquirect(canvas, MAX_EDGE) : canvas;
+
+	const texture = new THREE.CanvasTexture(mapped);
 	texture.colorSpace = THREE.SRGBColorSpace;
 	texture.anisotropy = 8;
 	return texture;
 }
 
-async function mountGlobe(el, url) {
+async function mountGlobe(el, url, { depolarSquare = false } = {}) {
 	disposeViewer();
 	el.replaceChildren();
 
-	const texture = await loadTexture(url);
+	const texture = await loadTexture(url, { depolarSquare });
 
 	const scene = new THREE.Scene();
 	scene.background = null;
@@ -175,7 +258,8 @@ async function mountGlobe(el, url) {
 		const h = el.clientHeight || window.innerHeight || 1;
 		camera.aspect = w / h;
 		camera.updateProjectionMatrix();
-		webgl.setSize(w, h, false);
+		// Match FE DistortedPanoramaViewer: size drawing buffer + element styles together.
+		webgl.setSize(w, h, true);
 	};
 	fit();
 	onWindowResize = fit;
@@ -218,7 +302,8 @@ async function refresh() {
 
 		if (!container) throw new Error('Missing #globe container');
 		setStatus('Loading preview…');
-		await mountGlobe(container, previewUrl);
+		// Fallback / square maps: DePolar centre→north like the FE globe pipeline.
+		await mountGlobe(container, previewUrl, { depolarSquare: job.fallback === true });
 		loadedPreviewUrl = previewUrl;
 		setStatus('');
 
