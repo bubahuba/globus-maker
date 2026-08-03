@@ -1,6 +1,16 @@
 import type { JobRecord, JobStatus, ProgressUpdate } from "../types";
+import { normalizeJobMode } from "../osm/tile-math";
 
 const memoryJobs = new Map<string, JobRecord>();
+
+/** R2 / memory pointer to the most recent globe job with a sphere preview. */
+const LATEST_GLOBE_KEY = "jobs/latest-globe.json";
+let memoryLatestGlobeId: string | null = null;
+
+export type LatestGlobePointer = {
+  jobId: string;
+  updatedAt: string;
+};
 
 export function createJobId(): string {
   return crypto.randomUUID();
@@ -163,6 +173,49 @@ export function isTerminalStatus(status: JobStatus): boolean {
   return status === "complete" || status === "failed";
 }
 
+export async function setLatestGlobeJob(
+  bucket: R2Bucket | undefined,
+  jobId: string,
+  updatedAt = new Date().toISOString(),
+): Promise<void> {
+  const pointer: LatestGlobePointer = { jobId, updatedAt };
+  memoryLatestGlobeId = jobId;
+  if (bucket) {
+    await bucket.put(LATEST_GLOBE_KEY, JSON.stringify(pointer), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  }
+}
+
+export async function getLatestGlobeJobId(
+  bucket: R2Bucket | undefined,
+): Promise<string | null> {
+  if (bucket) {
+    const obj = await bucket.get(LATEST_GLOBE_KEY);
+    if (obj) {
+      const pointer = (await obj.json()) as LatestGlobePointer;
+      if (pointer?.jobId) {
+        memoryLatestGlobeId = pointer.jobId;
+        return pointer.jobId;
+      }
+    }
+  }
+  return memoryLatestGlobeId;
+}
+
+/** Drop the monitor pointer when it still points at a purged/unavailable job. */
+export async function clearLatestGlobeJobIf(
+  bucket: R2Bucket | undefined,
+  jobId: string,
+): Promise<void> {
+  const current = await getLatestGlobeJobId(bucket);
+  if (current !== jobId) return;
+  memoryLatestGlobeId = null;
+  if (bucket) {
+    await bucket.delete(LATEST_GLOBE_KEY);
+  }
+}
+
 export async function addJobFile(
   bucket: R2Bucket | undefined,
   id: string,
@@ -175,6 +228,15 @@ export async function addJobFile(
   // Always bump updatedAt so clients can cache-bust replaced preview bytes.
   job.updatedAt = new Date().toISOString();
   await saveJob(bucket, job);
+
+  // Public monitor: keep a pointer to the newest globe job with a sphere preview.
+  if (
+    normalizeJobMode(job.request.mode) === "globe" &&
+    filename.toLowerCase() === "input-distorted-preview.jpg"
+  ) {
+    await setLatestGlobeJob(bucket, job.id, job.updatedAt);
+  }
+
   return job;
 }
 

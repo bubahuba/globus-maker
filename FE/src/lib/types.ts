@@ -127,3 +127,26 @@ export interface CreateJobResponse {
 		stripeWidthPx: number;
 	};
 }
+
+/** GET /api/jobs/latest-globe — public monitor payload. */
+export interface LatestGlobeJobResponse {
+	id: string | null;
+	status: JobStatus | null;
+	updatedAt?: string | null;
+	placeName?: string | null;
+	center?: LatLng | null;
+	sideMeters?: number | null;
+	diameterCm?: number | null;
+	stripes?: number | null;
+	mode: 'globe';
+	files: string[];
+	emptyFillColor: string;
+	mapCanvasColor: string;
+	mapLayers: MapLayerStyle | null;
+	/** API path, or monitor-relative `rip.jpeg` when `fallback` is true. */
+	spherePreviewUrl: string;
+	mapPreviewUrl: string | null;
+	mapPreviewFilename: string | null;
+	/** True when no recent globe job — `spherePreviewUrl` is relative to the monitor site. */
+	fallback: boolean;
+}

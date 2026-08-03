@@ -1,5 +1,5 @@
 import type { JobRecord } from "../types";
-import { getJob, saveJob } from "./store";
+import { clearLatestGlobeJobIf, getJob, saveJob } from "./store";
 
 const memoryArtifacts = new Map<string, ArrayBuffer>();
 
@@ -68,6 +68,7 @@ export async function purgeJobArtifacts(
   job.artifactsAvailable = false;
   job.updatedAt = new Date().toISOString();
   await saveJob(bucket, job);
+  await clearLatestGlobeJobIf(bucket, jobId);
   return job;
 }
 

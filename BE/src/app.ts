@@ -22,12 +22,19 @@ import {
   validateJobInput,
   squareBounds,
 } from "./osm/tile-math";
-import { buildMapStyle, buildRenderPalette, validateMapLayers } from "../../shared/map-style";
+import {
+  buildMapStyle,
+  buildRenderPalette,
+  getBaseFillColor,
+  getMapCanvasColor,
+  validateMapLayers,
+} from "../../shared/map-style";
 import {
   addJobFile,
   contentTypeForJobFile,
   createJobId,
   getJob,
+  getLatestGlobeJobId,
   isAllowedJobFilename,
   isTerminalStatus,
   markJobPaid,
@@ -66,9 +73,12 @@ app.use(
     origin: (origin) => {
       if (!origin) return "*";
       if (DEV_ORIGINS.includes(origin)) return origin;
+      // Allow any origin (monitor site may be hosted elsewhere).
       return origin;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Type", "Content-Length"],
   }),
 );
 
@@ -467,6 +477,93 @@ app.post("/api/jobs", async (c) => {
     },
     202,
   );
+});
+
+/** Monitor-site-relative fallback when no recent globe preview exists. */
+const MONITOR_FALLBACK_SPHERE = "rip.jpeg";
+
+function latestGlobeFallback() {
+  return {
+    id: null,
+    status: null,
+    updatedAt: null,
+    placeName: null,
+    center: null,
+    sideMeters: null,
+    diameterCm: null,
+    stripes: null,
+    mode: "globe" as const,
+    files: [] as string[],
+    emptyFillColor: "#808080",
+    mapCanvasColor: "#808080",
+    mapLayers: null,
+    /** Relative to the monitor site (not the API origin). */
+    spherePreviewUrl: MONITOR_FALLBACK_SPHERE,
+    mapPreviewUrl: null,
+    mapPreviewFilename: null,
+    fallback: true,
+  };
+}
+
+/**
+ * Latest globe job with a sphere preview — for the public monitor site
+ * (cross-origin; returns empty-fill + preview URLs like the FE globe card).
+ * When none is available, returns monitor-relative `rip.jpeg` as spherePreviewUrl.
+ */
+app.get("/api/jobs/latest-globe", async (c) => {
+  const jobId = await getLatestGlobeJobId(c.env.ARTIFACTS);
+  if (!jobId) return c.json(latestGlobeFallback());
+
+  let job = await getJob(c.env.ARTIFACTS, jobId);
+  if (!job) return c.json(latestGlobeFallback());
+
+  job = await purgeJobArtifactsIfExpired(c.env.ARTIFACTS, job);
+  if (job.artifactsAvailable === false) {
+    return c.json(latestGlobeFallback());
+  }
+
+  const mode = normalizeJobMode(job.request.mode);
+  if (mode !== "globe") {
+    return c.json(latestGlobeFallback());
+  }
+
+  const files = job.files ?? [];
+  const fileSet = new Set(files.map((f) => f.toLowerCase()));
+  if (!fileSet.has("input-distorted-preview.jpg")) {
+    return c.json(latestGlobeFallback());
+  }
+
+  const mapLayers = validateMapLayers(job.request.mapLayers);
+  const bust = job.updatedAt ? `?v=${encodeURIComponent(job.updatedAt)}` : "";
+  const mapFile = fileSet.has("input.svg")
+    ? "input.svg"
+    : fileSet.has("input.jpg")
+      ? "input.jpg"
+      : fileSet.has("input.jpeg")
+        ? (files.find((f) => f.toLowerCase() === "input.jpeg") ?? "input.jpg")
+        : null;
+
+  return c.json({
+    id: job.id,
+    status: job.status,
+    updatedAt: job.updatedAt,
+    placeName: job.request.placeName ?? null,
+    center: job.request.center,
+    sideMeters: job.request.sideMeters,
+    diameterCm: job.request.diameterCm,
+    stripes: job.request.stripes,
+    mode,
+    files,
+    emptyFillColor: getBaseFillColor(mapLayers),
+    mapCanvasColor: getMapCanvasColor(mapLayers),
+    mapLayers,
+    spherePreviewUrl: `/api/jobs/${job.id}/files/input-distorted-preview.jpg${bust}`,
+    mapPreviewUrl: mapFile
+      ? `/api/jobs/${job.id}/files/${encodeURIComponent(mapFile)}${bust}`
+      : null,
+    mapPreviewFilename: mapFile,
+    fallback: false,
+  });
 });
 
 app.get("/api/jobs/:id", async (c) => {

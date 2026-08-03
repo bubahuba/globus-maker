@@ -18,6 +18,7 @@ npm run deploy
 - **worker.ts** — Cloudflare Worker entry
 - **container/** — Python processor (MVT → SVG map → globe prewarp → slize.pl JPEG stripes → zip)
 - **shared/** — `map-style.ts` (layers, MapLibre style, render palette)
+- **monitor/** — static full-window Three.js globe (calls `https://globe.rgb.sk/api/jobs/latest-globe`)
 
 ## Cursor context
 
