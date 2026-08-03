@@ -95,6 +95,9 @@ function disposeViewer() {
 		onWindowResize = null;
 	}
 	if (sceneResources) {
+		if (sceneResources.onControlsStart) {
+			sceneResources.controls.removeEventListener('start', sceneResources.onControlsStart);
+		}
 		sceneResources.controls.dispose();
 		sceneResources.geometry.dispose();
 		sceneResources.material.dispose();
@@ -238,7 +241,8 @@ async function mountGlobe(el, url, opts = {}) {
 	scene.background = null;
 
 	const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-	camera.position.set(0, 0.35, 2.6);
+	// Slight elevation; distance set by frameGlobe() to cover the viewport.
+	camera.position.set(0, 0.12, 1);
 
 	const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 	webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -255,20 +259,39 @@ async function mountGlobe(el, url, opts = {}) {
 	const controls = new OrbitControls(camera, webgl.domElement);
 	controls.enableDamping = true;
 	controls.dampingFactor = 0.06;
-	controls.minDistance = 1.35;
-	controls.maxDistance = 5;
+	controls.minDistance = 1.15;
+	controls.maxDistance = 6;
 	controls.target.set(0, 0, 0);
-	controls.update();
 
-	sceneResources = { geometry, material, texture, controls, globe };
+	/** Keep cover-framing on resize until the user orbits / zooms. */
+	let autoFrame = true;
+	const onControlsStart = () => {
+		autoFrame = false;
+	};
+	controls.addEventListener('start', onControlsStart);
+
+	/** Pull camera in so the unit sphere covers the whole viewport (crop edges). */
+	const frameGlobe = () => {
+		const vFov = THREE.MathUtils.degToRad(camera.fov);
+		const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+		const fillFov = Math.max(vFov, hFov);
+		const distance = (1 / Math.sin(fillFov / 2)) * 0.96;
+		const dir = camera.position.clone().sub(controls.target);
+		if (dir.lengthSq() < 1e-8) dir.set(0, 0.12, 1);
+		dir.normalize();
+		camera.position.copy(controls.target).addScaledVector(dir, distance);
+		controls.update();
+	};
+
+	sceneResources = { geometry, material, texture, controls, globe, onControlsStart };
 
 	const fit = () => {
 		const w = el.clientWidth || window.innerWidth || 1;
 		const h = el.clientHeight || window.innerHeight || 1;
 		camera.aspect = w / h;
 		camera.updateProjectionMatrix();
-		// Match FE DistortedPanoramaViewer: size drawing buffer + element styles together.
 		webgl.setSize(w, h, true);
+		if (autoFrame) frameGlobe();
 	};
 	fit();
 	onWindowResize = fit;
