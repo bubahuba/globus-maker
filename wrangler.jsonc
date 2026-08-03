@@ -4,6 +4,8 @@
   "main": "worker.ts",
   "compatibility_date": "2026-07-09",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
   "observability": {
     "logs": { "enabled": true, "invocation_logs": true }
   },
@@ -32,10 +34,18 @@
       "deleted_classes": ["GlobusProcessor"]
     }
   ],
+  // Requires no conflicting A/CNAME for globe on the rgb.sk zone.
+  // If deploy fails with 409, delete that DNS record, then redeploy.
+  "routes": [
+    {
+      "pattern": "globe.rgb.sk",
+      "custom_domain": true
+    }
+  ],
   "vars": {
     "PROCESSOR_URL": "https://globus-processor.rascasone.dev",
-//    "PUBLIC_SITE_ORIGIN": "https://globus-maker.shadow-hub.workers.dev",
     "PUBLIC_SITE_ORIGIN": "https://globe.rgb.sk",
+    "API_CALLBACK_ORIGIN": "https://globe.rgb.sk",
     "PAYPAL_MODE": "live",
     "PAYPAL_CURRENCY": "EUR"
   }
