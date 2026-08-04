@@ -42,6 +42,7 @@
 		stripeWidthPx
 	} from '@shared/tile-constants';
 	import SeoHead from '@lib/components/SeoHead.svelte';
+	import { trackModeEvent } from '@lib/analytics';
 	import { HOME_DESCRIPTION, HOME_OG_IMAGES, SITE_NAME } from '@lib/seo';
 	const MIN_SQUARE_SIDE_PX = 500;
 	const MAX_SQUARE_SIDE_PX = 10000;
@@ -505,6 +506,19 @@
 	async function generateStripes() {
 		if (!center && !uploadedMapFile) return;
 
+		if (mode === 'map') {
+			trackModeEvent('generate', 'map', {
+				city: placeName,
+				squareSidePx: Math.round(Number(squareSidePx))
+			});
+		} else {
+			trackModeEvent('generate', 'globe', {
+				city: placeName,
+				diameterCm: roundCm1(diameterCm),
+				stripes: Math.round(Number(stripes))
+			});
+		}
+
 		if (jobId && jobStatus && jobStatus !== 'complete' && jobStatus !== 'failed') {
 			cancelJob(jobId);
 		}
@@ -613,6 +627,8 @@
 							{downloadFilename}
 							{globeDownloadFormat}
 							diameterCm={(jobMode ?? mode) === 'globe' ? diameterCm : undefined}
+							squareSidePx={(jobMode ?? mode) === 'map' ? squareSidePx : undefined}
+							placeName={placeName}
 							{artifactsAvailable}
 							paid={jobPaid}
 							onpaid={() => {

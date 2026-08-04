@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { trackModeEvent, type AnalyticsParams } from '@lib/analytics';
 	import {
 		capturePaypalOrder,
 		createPaypalOrder,
@@ -15,6 +16,10 @@
 		filename?: string | null;
 		/** Job globe diameter — drives checkout price (€2–€6). */
 		diameterCm?: number;
+		/** Stripe count for analytics. */
+		stripeCount?: number;
+		/** Place label for analytics. */
+		placeName?: string | null;
 		/** Selected globe download packaging (affects PayPal line item name). */
 		downloadFormat?: 'zip' | 'pdf';
 		/** Full globe zip after successful capture. */
@@ -29,6 +34,8 @@
 		jobId,
 		filename = null,
 		diameterCm,
+		stripeCount,
+		placeName = null,
 		downloadFormat = 'zip',
 		ondownload,
 		onfreeDownload,
@@ -67,6 +74,20 @@
 
 	const zipLabel = $derived(filename ?? (downloadFormat === 'pdf' ? 'pdf' : 'zip'));
 
+	const globeAnalyticsParams = $derived.by((): AnalyticsParams => {
+		const params: AnalyticsParams = {
+			city: placeName,
+			format: downloadFormat
+		};
+		if (diameterCm != null && Number.isFinite(diameterCm)) {
+			params.diameterCm = Number(diameterCm);
+		}
+		if (stripeCount != null && Number.isFinite(stripeCount)) {
+			params.stripes = Math.round(Number(stripeCount));
+		}
+		return params;
+	});
+
 	function close() {
 		if (!open) return;
 		open = false;
@@ -92,6 +113,7 @@
 		payError = null;
 		try {
 			await navigator.clipboard.writeText(window.location.href);
+			trackModeEvent('share', 'globe', globeAnalyticsParams);
 			shareCopied = true;
 			clearTimeout(shareCopyTimer);
 			shareCopyTimer = setTimeout(() => {
@@ -100,6 +122,16 @@
 		} catch {
 			payError = 'Could not copy link to clipboard';
 		}
+	}
+
+	function trackPurchase() {
+		const amountNum = previewAmount != null ? Number(previewAmount) : NaN;
+		trackModeEvent('purchase', 'globe', {
+			...globeAnalyticsParams,
+			value: Number.isFinite(amountNum) ? amountNum : previewAmount,
+			currency: amountCurrency,
+			paypalMode: config?.mode
+		});
 	}
 
 	async function afterPaid() {
@@ -211,6 +243,7 @@
 						try {
 							const result = await capturePaypalOrder(data.orderID, jobId);
 							if (!result.paid) throw new Error('Payment was not completed');
+							trackPurchase();
 							await afterPaid();
 						} catch (err) {
 							payError = err instanceof Error ? err.message : 'Payment failed';

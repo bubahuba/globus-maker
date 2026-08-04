@@ -5,6 +5,7 @@
 		mapSvgFilenameFromZip,
 		withDownloadExtension
 	} from '@lib/api/jobs';
+	import { trackModeEvent, type AnalyticsParams } from '@lib/analytics';
 	import PaypalCheckoutDialog from '@lib/components/PaypalCheckoutDialog.svelte';
 	import type {
 		CreateJobResponse,
@@ -64,6 +65,10 @@
 		globeDownloadFormat?: GlobeDownloadFormat;
 		/** Globe diameter used for PayPal price (€2 at 20 cm → €6 at 60 cm). */
 		diameterCm?: number;
+		/** Map-mode square edge length for analytics. */
+		squareSidePx?: number;
+		/** Place label for analytics (city / search name). */
+		placeName?: string | null;
 		/** False after zip was downloaded or server TTL purged files. */
 		artifactsAvailable?: boolean;
 		/** Globe zip unlocked after PayPal capture. */
@@ -88,6 +93,8 @@
 		downloadFilename = null,
 		globeDownloadFormat = 'zip',
 		diameterCm,
+		squareSidePx,
+		placeName = null,
 		artifactsAvailable = true,
 		paid = false,
 		onpaid,
@@ -99,6 +106,22 @@
 			? withDownloadExtension(downloadFilename, globeDownloadFormat)
 			: downloadFilename
 	);
+
+	const jobAnalyticsParams = $derived.by((): AnalyticsParams => {
+		const params: AnalyticsParams = { city: placeName };
+		if (mode === 'map') {
+			const side =
+				squareSidePx ??
+				(Number.isFinite(manifest.outputSizePx) ? manifest.outputSizePx : undefined);
+			if (side != null) params.squareSidePx = Math.round(Number(side));
+		} else {
+			if (diameterCm != null && Number.isFinite(diameterCm)) {
+				params.diameterCm = Number(diameterCm);
+			}
+			params.stripes = Math.round(Number(stripeCount));
+		}
+		return params;
+	});
 
 	let downloading = $state(false);
 	let downloadError = $state<string | null>(null);
@@ -120,6 +143,10 @@
 		try {
 			const format = mode === 'globe' ? globeDownloadFormat : 'zip';
 			await downloadJobZip(jobId, paidDownloadName, format);
+			trackModeEvent('download', mode, {
+				...jobAnalyticsParams,
+				format
+			});
 			ondownloaded?.();
 		} catch (err) {
 			downloadError = err instanceof Error ? err.message : 'Download failed';
@@ -140,6 +167,11 @@
 		downloadError = null;
 		try {
 			await downloadJobMapSvg(jobId, mapSvgFilenameFromZip(downloadFilename));
+			trackModeEvent('download', 'map', {
+				city: placeName,
+				format: 'svg',
+				free: true
+			});
 		} catch (err) {
 			downloadError = err instanceof Error ? err.message : 'Download failed';
 		} finally {
@@ -470,6 +502,8 @@
 		{jobId}
 		filename={paidDownloadName}
 		{diameterCm}
+		stripeCount={stripeCount}
+		placeName={placeName}
 		downloadFormat={globeDownloadFormat}
 		ondownload={runPaidDownload}
 		onfreeDownload={runFreeMapSvgDownload}
