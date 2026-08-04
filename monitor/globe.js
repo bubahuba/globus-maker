@@ -241,8 +241,8 @@ async function mountGlobe(el, url, opts = {}) {
 	scene.background = null;
 
 	const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-	// Slight elevation; distance set by frameGlobe() to cover the viewport.
-	camera.position.set(0, 0.12, 1);
+	// Bias toward north pole (+Y); distance set by frameGlobe() to cover the viewport.
+	camera.position.set(0, 0.95, 0.85);
 
 	const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 	webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -259,7 +259,7 @@ async function mountGlobe(el, url, opts = {}) {
 	const controls = new OrbitControls(camera, webgl.domElement);
 	controls.enableDamping = true;
 	controls.dampingFactor = 0.06;
-	controls.minDistance = 1.15;
+	controls.minDistance = 1.05;
 	controls.maxDistance = 6;
 	controls.target.set(0, 0, 0);
 
@@ -275,9 +275,9 @@ async function mountGlobe(el, url, opts = {}) {
 		const vFov = THREE.MathUtils.degToRad(camera.fov);
 		const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
 		const fillFov = Math.max(vFov, hFov);
-		const distance = (1 / Math.sin(fillFov / 2)) * 0.96;
+		const distance = (1 / Math.sin(fillFov / 2)) * 0.72;
 		const dir = camera.position.clone().sub(controls.target);
-		if (dir.lengthSq() < 1e-8) dir.set(0, 0.12, 1);
+		if (dir.lengthSq() < 1e-8) dir.set(0, 0.95, 0.85);
 		dir.normalize();
 		camera.position.copy(controls.target).addScaledVector(dir, distance);
 		controls.update();
