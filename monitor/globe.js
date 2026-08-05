@@ -43,31 +43,69 @@ function parseHex(hex) {
 	return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
-function mixChannel(ch, toward, amount) {
-	return Math.round(ch + (toward - ch) * amount);
+/** Random stars on a spherical shell around the globe. */
+function createStarfield(count = 6000) {
+	const positions = new Float32Array(count * 3);
+	const colors = new Float32Array(count * 3);
+	for (let i = 0; i < count; i++) {
+		const r = 12 + Math.random() * 50;
+		const theta = Math.random() * Math.PI * 2;
+		const phi = Math.acos(2 * Math.random() - 1);
+		const sinPhi = Math.sin(phi);
+		positions[i * 3] = r * sinPhi * Math.cos(theta);
+		positions[i * 3 + 1] = r * sinPhi * Math.sin(theta);
+		positions[i * 3 + 2] = r * Math.cos(phi);
+		// Slight warm/cool variation so stars read on black.
+		const tint = 0.75 + Math.random() * 0.25;
+		const cool = Math.random() * 0.12;
+		colors[i * 3] = tint;
+		colors[i * 3 + 1] = tint - cool * 0.35;
+		colors[i * 3 + 2] = Math.min(1, tint + cool);
+	}
+	const geometry = new THREE.BufferGeometry();
+	geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+	geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+	const material = new THREE.PointsMaterial({
+		size: 2.2,
+		sizeAttenuation: false,
+		vertexColors: true,
+		transparent: true,
+		opacity: 0.95,
+		depthWrite: false
+	});
+	return { points: new THREE.Points(geometry, material), geometry, material };
 }
 
-function mixHex(hex, toward, amount) {
-	const c = parseHex(hex);
-	if (!c) return hex;
-	const r = mixChannel(c.r, toward, amount);
-	const g = mixChannel(c.g, toward, amount);
-	const b = mixChannel(c.b, toward, amount);
-	return `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
-}
+/** Soft additive sun disc placed along the key-light direction. */
+function createSun(direction, distance = 46) {
+	const size = 256;
+	const canvas = document.createElement('canvas');
+	canvas.width = size;
+	canvas.height = size;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) throw new Error('Canvas unavailable');
+	const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+	g.addColorStop(0, 'rgba(255, 255, 245, 1)');
+	g.addColorStop(0.12, 'rgba(255, 236, 180, 0.95)');
+	g.addColorStop(0.35, 'rgba(255, 190, 90, 0.45)');
+	g.addColorStop(0.65, 'rgba(255, 140, 50, 0.12)');
+	g.addColorStop(1, 'rgba(255, 120, 40, 0)');
+	ctx.fillStyle = g;
+	ctx.fillRect(0, 0, size, size);
 
-function gradientFromBase(base) {
-	const dark = mixHex(base, 0, 0.32);
-	const light = mixHex(base, 255, 0.16);
-	return `radial-gradient(ellipse 125% 110% at 50% 38%, ${dark} 0%, ${base} 48%, ${light} 100%)`;
-}
-
-function applyBackground(emptyFillColor) {
-	const base = parseHex(emptyFillColor) ? emptyFillColor : '#f5f5f4';
-	const gradient = gradientFromBase(base);
-	document.body.style.background = gradient;
-	if (container) container.style.background = gradient;
-	if (statusEl) statusEl.style.background = gradient;
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.colorSpace = THREE.SRGBColorSpace;
+	const material = new THREE.SpriteMaterial({
+		map: texture,
+		transparent: true,
+		depthWrite: false,
+		blending: THREE.AdditiveBlending,
+		toneMapped: false
+	});
+	const sprite = new THREE.Sprite(material);
+	sprite.scale.setScalar(9.5);
+	sprite.position.copy(direction).normalize().multiplyScalar(distance);
+	return { sprite, texture, material };
 }
 
 /**
@@ -102,6 +140,10 @@ function disposeViewer() {
 		sceneResources.geometry.dispose();
 		sceneResources.material.dispose();
 		sceneResources.texture.dispose();
+		sceneResources.starsGeometry?.dispose();
+		sceneResources.starsMaterial?.dispose();
+		sceneResources.sunTexture?.dispose();
+		sceneResources.sunMaterial?.dispose();
 		sceneResources = null;
 	}
 	if (renderer) {
@@ -238,21 +280,42 @@ async function mountGlobe(el, url, opts = {}) {
 	const texture = await loadTexture(url, opts);
 
 	const scene = new THREE.Scene();
-	scene.background = null;
+	scene.background = new THREE.Color(0x000000);
 
 	const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-	// Bias toward north pole (+Y); distance set by frameGlobe() to cover the viewport.
+	// Bias toward north pole (+Y); distance set by frameGlobe().
 	camera.position.set(0, 0.95, 0.85);
 
-	const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+	const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 	webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 	webgl.outputColorSpace = THREE.SRGBColorSpace;
-	webgl.setClearColor(0x000000, 0);
+	webgl.toneMapping = THREE.ACESFilmicToneMapping;
+	webgl.toneMappingExposure = 1.05;
+	webgl.setClearColor(0x000000, 1);
 	el.appendChild(webgl.domElement);
 	renderer = webgl;
 
+	const stars = createStarfield();
+	scene.add(stars.points);
+
+	// Sun key + soft fill so the night side stays readable.
+	const sunDir = new THREE.Vector3(4.2, 1.4, 2.6);
+	const sunLight = new THREE.DirectionalLight(0xfff1dd, 1.55);
+	sunLight.position.copy(sunDir);
+	scene.add(sunLight);
+	const sun = createSun(sunDir);
+	scene.add(sun.sprite);
+	scene.add(new THREE.AmbientLight(0x9aa8c4, 0.42));
+	const nightFill = new THREE.DirectionalLight(0x6d7fa8, 0.22);
+	nightFill.position.set(-3.5, -0.4, -2.2);
+	scene.add(nightFill);
+
 	const geometry = new THREE.SphereGeometry(1, 96, 64);
-	const material = new THREE.MeshBasicMaterial({ map: texture });
+	const material = new THREE.MeshStandardMaterial({
+		map: texture,
+		roughness: 0.92,
+		metalness: 0
+	});
 	const globe = new THREE.Mesh(geometry, material);
 	scene.add(globe);
 
@@ -263,19 +326,19 @@ async function mountGlobe(el, url, opts = {}) {
 	controls.maxDistance = 6;
 	controls.target.set(0, 0, 0);
 
-	/** Keep cover-framing on resize until the user orbits / zooms. */
+	/** Keep contain-framing on resize until the user orbits / zooms. */
 	let autoFrame = true;
 	const onControlsStart = () => {
 		autoFrame = false;
 	};
 	controls.addEventListener('start', onControlsStart);
 
-	/** Pull camera in so the unit sphere covers the whole viewport (crop edges). */
+	/** Pull camera so the unit sphere fits with starfield visible around it. */
 	const frameGlobe = () => {
 		const vFov = THREE.MathUtils.degToRad(camera.fov);
 		const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-		const fillFov = Math.max(vFov, hFov);
-		const distance = (1 / Math.sin(fillFov / 2)) * 0.72;
+		const fitFov = Math.min(vFov, hFov);
+		const distance = (1 / Math.sin(fitFov / 2)) * 1.2;
 		const dir = camera.position.clone().sub(controls.target);
 		if (dir.lengthSq() < 1e-8) dir.set(0, 0.95, 0.85);
 		dir.normalize();
@@ -283,7 +346,18 @@ async function mountGlobe(el, url, opts = {}) {
 		controls.update();
 	};
 
-	sceneResources = { geometry, material, texture, controls, globe, onControlsStart };
+	sceneResources = {
+		geometry,
+		material,
+		texture,
+		controls,
+		globe,
+		onControlsStart,
+		starsGeometry: stars.geometry,
+		starsMaterial: stars.material,
+		sunTexture: sun.texture,
+		sunMaterial: sun.material
+	};
 
 	const fit = () => {
 		const w = el.clientWidth || window.innerWidth || 1;
@@ -320,7 +394,6 @@ async function fetchLatestGlobe() {
 async function refresh() {
 	try {
 		const job = await fetchLatestGlobe();
-		applyBackground(job.emptyFillColor || '#f5f5f4');
 
 		const previewUrl = resolvePreviewUrl(job.spherePreviewUrl, {
 			fallback: job.fallback === true
@@ -352,7 +425,6 @@ async function refresh() {
 	}
 }
 
-applyBackground('#f5f5f4');
 void refresh();
 setInterval(() => void refresh(), POLL_MS);
 

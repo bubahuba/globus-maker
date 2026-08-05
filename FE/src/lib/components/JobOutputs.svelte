@@ -23,8 +23,6 @@
 		outputFormat?: OutputFormat | null;
 		/** SVG / map image letterbox (land canvas). */
 		mapCanvasColor?: string | null;
-		/** Empty fill hex for 3D sphere scene background. */
-		emptyFillColor?: string | null;
 		visible: boolean;
 	}
 
@@ -40,7 +38,6 @@
 		mode = null,
 		outputFormat = null,
 		mapCanvasColor = null,
-		emptyFillColor = null,
 		visible
 	}: Props = $props();
 
@@ -316,7 +313,6 @@
 								spherePreviewFile,
 								sphereRevision ?? revision ?? undefined
 							)}
-							backgroundColor={emptyFillColor ?? undefined}
 						/>
 					</div>
 				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}

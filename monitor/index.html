@@ -6,7 +6,7 @@
 		<title>Globus Maker — Globe Monitor</title>
 		<style>
 			:root {
-				color-scheme: light;
+				color-scheme: dark;
 			}
 
 			* {
@@ -28,7 +28,7 @@
 					Helvetica,
 					Arial,
 					sans-serif;
-				background: #f5f5f4;
+				background: #000;
 			}
 
 			#globe {
@@ -51,7 +51,8 @@
 				padding: 1.5rem;
 				text-align: center;
 				font-size: 0.95rem;
-				color: #92400e;
+				color: #e7e5e4;
+				background: #000;
 				pointer-events: none;
 				z-index: 2;
 			}
@@ -63,20 +64,27 @@
 			#hint {
 				position: fixed;
 				left: 0;
-				right: 5.5rem;
+				right: 10.5rem;
 				bottom: 0.75rem;
 				text-align: center;
 				font-size: 0.75rem;
-				color: rgba(68, 64, 60, 0.55);
+				color: rgba(231, 229, 228, 0.45);
 				pointer-events: none;
 				z-index: 2;
 			}
 
-			#app-link {
+			#app-links {
 				position: fixed;
 				right: max(0.85rem, env(safe-area-inset-right));
 				bottom: max(0.85rem, env(safe-area-inset-bottom));
 				z-index: 3;
+				display: flex;
+				flex-direction: row;
+				align-items: flex-end;
+				gap: 0.65rem;
+			}
+
+			.app-link {
 				display: flex;
 				flex-direction: column;
 				align-items: center;
@@ -84,36 +92,36 @@
 				width: 4.5rem;
 				padding: 0.35rem 0.25rem 0.2rem;
 				text-decoration: none;
-				color: #1c1917;
+				color: #e7e5e4;
 				-webkit-tap-highlight-color: transparent;
-				filter: drop-shadow(0 1px 2px rgba(28, 25, 23, 0.12));
+				filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 			}
 
-			#app-link:focus-visible {
-				outline: 2px solid #292524;
+			.app-link:focus-visible {
+				outline: 2px solid #e7e5e4;
 				outline-offset: 3px;
 				border-radius: 0.35rem;
 			}
 
-			#app-link .app-icon {
+			.app-link .app-icon {
 				display: block;
 				width: 3.75rem;
 				height: 3.75rem;
 				border-radius: 0.85rem;
 				object-fit: cover;
-				background: #f5f5f4;
+				background: transparent;
 				box-shadow:
 					0 0 0 0.5px rgba(28, 25, 23, 0.08),
 					0 6px 16px rgba(28, 25, 23, 0.14);
 				transition: transform 0.15s ease;
 			}
 
-			#app-link:hover .app-icon,
-			#app-link:active .app-icon {
+			.app-link:hover .app-icon,
+			.app-link:active .app-icon {
 				transform: scale(0.94);
 			}
 
-			#app-link .app-label {
+			.app-link .app-label {
 				display: block;
 				width: 100%;
 				text-align: center;
@@ -121,7 +129,8 @@
 				font-weight: 500;
 				line-height: 1.15;
 				letter-spacing: -0.01em;
-				text-shadow: 0 0.5px 1px rgba(255, 255, 255, 0.7);
+				text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+				color: white;
 			}
 		</style>
 		<script type="importmap">
@@ -137,15 +146,32 @@
 		<div id="globe" aria-label="Globe preview"></div>
 		<p id="status">Loading latest globe…</p>
 		<p id="hint">Drag to orbit · scroll to zoom</p>
-		<a
-			id="app-link"
-			href="https://globe.rgb.sk"
-			rel="noopener noreferrer"
-			aria-label="Try Globe Maker"
-		>
-			<img class="app-icon" src="./app-icon.png" width="192" height="192" alt="" />
-			<span class="app-label">try Globe Maker</span>
-		</a>
+		<nav id="app-links" aria-label="Apps">
+			<a
+				class="app-link"
+				href="https://partnercheck.huba.sk"
+				rel="noopener noreferrer"
+				aria-label="Try Partner Check"
+			>
+				<img
+					class="app-icon"
+					src="./partnercheck-app-icon.png"
+					width="192"
+					height="192"
+					alt=""
+				/>
+				<span class="app-label">PartnerCheck</span>
+			</a>
+			<a
+				class="app-link"
+				href="https://globe.rgb.sk"
+				rel="noopener noreferrer"
+				aria-label="Try Globe Maker"
+			>
+				<img class="app-icon" src="./app-icon.png" width="192" height="192" alt="" />
+				<span class="app-label">Globe Maker</span>
+			</a>
+		</nav>
 		<script type="module" src="./globe.js"></script>
 	</body>
 </html>

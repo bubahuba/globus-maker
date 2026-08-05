@@ -962,7 +962,6 @@
 			{artifactsAvailable}
 			{outputFormat}
 			mapCanvasColor={getMapCanvasColor(mapLayers)}
-			emptyFillColor={getBaseFillColor(mapLayers)}
 			visible={true}
 		/>
 	{/if}
