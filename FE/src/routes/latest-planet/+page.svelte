@@ -57,17 +57,17 @@
 		/>
 		{#if placeName}
 			<p
-				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-stone-200/90 backdrop-blur-sm"
+				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-ink/90 backdrop-blur-sm"
 			>
 				{placeName}
 			</p>
 		{/if}
 	{:else if error}
-		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-stone-300">
+		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-ink-subtle">
 			{error}
 		</p>
 	{:else}
-		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-stone-300">
+		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-ink-subtle">
 			Loading latest globe…
 		</p>
 	{/if}

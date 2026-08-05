@@ -576,9 +576,9 @@
 <SeoHead title={SITE_NAME} description={HOME_DESCRIPTION} images={HOME_OG_IMAGES} />
 <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8">
 	<header class="space-y-2">
-		<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Globus Maker</p>
-		<h1 class="text-3xl font-semibold text-stone-900">Map a region, or print globe stripes</h1>
-		<p class="max-w-2xl text-stone-600">
+		<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">Globus Maker</p>
+		<h1 class="text-3xl font-semibold text-ink">Map a region, or print globe stripes</h1>
+		<p class="max-w-2xl text-ink-secondary">
 			Search for any place or click the map to choose a square region. Export a square map, or
 			generate meridian stripes for your globe.
 		</p>
@@ -586,7 +586,7 @@
 
 	<div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
 		<div class="lg:sticky lg:top-20 lg:self-start">
-			<section class="space-y-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-stone-200">
+			<section class="space-y-3 rounded-2xl bg-panel p-3 shadow-sm ring-1 ring-line">
 				{#if !uploadedMapUrl}
 					<PlaceSearch value={placeName} onselect={onPlaceSelect} />
 				{/if}
@@ -598,7 +598,7 @@
 					/>
 				{:else}
 					<div
-						class="aspect-square w-full overflow-hidden rounded-xl border border-stone-300 shadow-inner"
+						class="aspect-square w-full overflow-hidden rounded-xl border border-line-strong shadow-inner"
 					>
 						<MapSelector
 							{center}
@@ -647,11 +647,11 @@
 		</div>
 
 		<aside class="space-y-4">
-			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
-				<h2 class="mb-4 text-lg font-medium text-stone-900">Settings</h2>
+			<div class="rounded-2xl bg-panel p-5 shadow-sm ring-1 ring-line">
+				<h2 class="mb-4 text-lg font-medium text-ink">Settings</h2>
 
 				<fieldset class="mb-4 space-y-2">
-					<legend class="text-sm text-stone-600">Mode</legend>
+					<legend class="text-sm text-ink-secondary">Mode</legend>
 					<div class="grid grid-cols-2 gap-2">
 						<label class="cursor-pointer">
 							<input
@@ -662,7 +662,7 @@
 								class="peer sr-only"
 							/>
 							<span
-								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 							>
 								Map
 							</span>
@@ -676,7 +676,7 @@
 								class="peer sr-only"
 							/>
 							<span
-								class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+								class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 							>
 								Globe
 							</span>
@@ -696,11 +696,11 @@
 						<button
 							type="button"
 							onclick={() => uploadFileInput?.click()}
-							class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-amber-800 hover:bg-amber-50 hover:text-amber-900"
+							class="w-full rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink"
 						>
 							Upload map
 						</button>
-						<span class="block text-xs text-stone-400">
+						<span class="block text-xs text-ink-subtle">
 							Use your own square map instead of OpenStreetMap — handy if you already designed one.
 						</span>
 					</div>
@@ -708,7 +708,7 @@
 
 				{#if !uploadedMapUrl}
 					<label class="mb-4 block space-y-2">
-						<span class="text-sm text-stone-600">Square side map</span>
+						<span class="text-sm text-ink-secondary">Square side map</span>
 						<input
 							type="range"
 							min="0"
@@ -718,10 +718,10 @@
 							oninput={(event) => {
 								sideMeters = sliderToSide(Number(event.currentTarget.value));
 							}}
-							class="w-full accent-amber-700"
+							class="w-full accent-accent"
 						/>
-						<span class="text-sm font-medium text-stone-800">{formatSideMeters(sideMeters)}</span>
-						<span class="block text-xs text-stone-400">
+						<span class="text-sm font-medium text-ink">{formatSideMeters(sideMeters)}</span>
+						<span class="block text-xs text-ink-subtle">
 							{formatSideMeters(MIN_SIDE_METERS)} – {formatSideMeters(MAX_SIDE_METERS)}
 						</span>
 					</label>
@@ -729,25 +729,25 @@
 
 				{#if mode === 'map'}
 					<label class="mb-4 block space-y-2">
-						<span class="text-sm text-stone-600">Square side output</span>
+						<span class="text-sm text-ink-secondary">Square side output</span>
 						<input
 							type="range"
 							min={MIN_SQUARE_SIDE_PX}
 							max={MAX_SQUARE_SIDE_PX}
 							step="100"
 							bind:value={squareSidePx}
-							class="w-full accent-amber-700"
+							class="w-full accent-accent"
 						/>
-						<span class="text-sm font-medium text-stone-800"
+						<span class="text-sm font-medium text-ink"
 							>{Math.round(Number(squareSidePx)).toLocaleString()} px</span
 						>
-						<span class="block text-xs text-stone-400">
+						<span class="block text-xs text-ink-subtle">
 							{MIN_SQUARE_SIDE_PX.toLocaleString()} – {MAX_SQUARE_SIDE_PX.toLocaleString()} px
 						</span>
 					</label>
 
 					<fieldset class="mb-4 space-y-2">
-						<legend class="text-sm text-stone-600">Output format</legend>
+						<legend class="text-sm text-ink-secondary">Output format</legend>
 						<div class="grid grid-cols-2 gap-2">
 							<label class="cursor-pointer">
 								<input
@@ -758,7 +758,7 @@
 									class="peer sr-only"
 								/>
 								<span
-									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+									class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 								>
 									JPEG
 								</span>
@@ -772,7 +772,7 @@
 									class="peer sr-only"
 								/>
 								<span
-									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+									class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 								>
 									SVG
 								</span>
@@ -781,30 +781,30 @@
 					</fieldset>
 				{:else}
 					<label class="mb-4 block space-y-2">
-						<span class="text-sm text-stone-600">Stripes</span>
+						<span class="text-sm text-ink-secondary">Stripes</span>
 						<input
 							type="number"
 							min="4"
 							max="36"
 							bind:value={stripes}
-							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+							class="w-full rounded-lg border border-line-strong px-3 py-2"
 						/>
 					</label>
 
 					<label class="mb-4 block space-y-2">
-						<span class="text-sm text-stone-600">Globe diameter (cm)</span>
+						<span class="text-sm text-ink-secondary">Globe diameter (cm)</span>
 						<input
 							type="number"
 							min="10"
 							max="60"
 							step="0.1"
 							bind:value={diameterCm}
-							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+							class="w-full rounded-lg border border-line-strong px-3 py-2"
 						/>
 					</label>
 
 					<label class="mb-4 block space-y-2">
-						<span class="text-sm text-stone-600">Circumference (cm)</span>
+						<span class="text-sm text-ink-secondary">Circumference (cm)</span>
 						<input
 							type="number"
 							min={circumferenceFromDiameter(10)}
@@ -816,15 +816,15 @@
 									Number(event.currentTarget.value)
 								);
 							}}
-							class="w-full rounded-lg border border-stone-300 px-3 py-2"
+							class="w-full rounded-lg border border-line-strong px-3 py-2"
 						/>
-						<span class="block text-xs text-stone-400">
+						<span class="block text-xs text-ink-subtle">
 							π × diameter — informational; editing updates diameter
 						</span>
 					</label>
 
 					<fieldset class="mb-4 space-y-2">
-						<legend class="text-sm text-stone-600">Download format</legend>
+						<legend class="text-sm text-ink-secondary">Download format</legend>
 						<div class="grid grid-cols-2 gap-2">
 							<label class="cursor-pointer">
 								<input
@@ -835,7 +835,7 @@
 									class="peer sr-only"
 								/>
 								<span
-									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+									class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 								>
 									ZIP
 								</span>
@@ -849,13 +849,13 @@
 									class="peer sr-only"
 								/>
 								<span
-									class="flex items-center justify-center rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition peer-checked:border-amber-800 peer-checked:bg-amber-50 peer-checked:text-amber-900"
+									class="flex items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-ink"
 								>
 									PDF
 								</span>
 							</label>
 						</div>
-						<span class="block text-xs text-stone-400">
+						<span class="block text-xs text-ink-subtle">
 							ZIP — separate files plus a README. PDF — everything on one page for printing.
 						</span>
 					</fieldset>
@@ -865,30 +865,30 @@
 					type="button"
 					onclick={generateStripes}
 					disabled={submitting || !!estimateError || (!center && !uploadedMapUrl)}
-					class="w-full rounded-xl bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-900 disabled:cursor-not-allowed disabled:bg-stone-300"
+					class="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-btn-disabled"
 				>
 					{generateButtonLabel}
 				</button>
 			</div>
 
-			<div class="rounded-2xl bg-stone-900 p-5 text-stone-100 shadow-sm">
+			<div class="rounded-2xl bg-btn p-5 text-btn-ink shadow-sm">
 				<h2 class="mb-3 text-lg font-medium">Preview</h2>
 				{#if uploadedMapUrl}
 					{#if estimateError}
-						<p class="text-sm text-red-300">{estimateError}</p>
+						<p class="text-sm text-red-400">{estimateError}</p>
 					{:else if estimate}
 						<dl class="space-y-2 text-sm">
 							<div class="flex justify-between gap-4">
-								<dt class="text-stone-400">Source</dt>
+								<dt class="text-btn-ink/55">Source</dt>
 								<dd class="truncate text-right">{uploadedMapFile?.name ?? 'Uploaded map'}</dd>
 							</div>
 							<div class="flex justify-between gap-4">
-								<dt class="text-stone-400">Map image</dt>
+								<dt class="text-btn-ink/55">Map image</dt>
 								<dd>~{estimate.targetOutputPx.toLocaleString()}px square</dd>
 							</div>
 							{#if mode === 'globe'}
 								<div class="flex justify-between gap-4">
-									<dt class="text-stone-400">Strip size</dt>
+									<dt class="text-btn-ink/55">Strip size</dt>
 									<dd class="text-right">
 										{formatStripePrintSizeCm(estimate.stripeWidthPx, estimate.stripeHeightPx) ??
 											`${estimate.stripeWidthPx} × ${estimate.stripeHeightPx} px`}
@@ -897,30 +897,30 @@
 							{/if}
 						</dl>
 					{:else}
-						<p class="text-sm text-stone-400">Uploaded map</p>
+						<p class="text-sm text-btn-ink/55">Uploaded map</p>
 					{/if}
 				{:else if !center}
-					<p class="text-sm text-stone-400">Choose a location to see tile estimates.</p>
+					<p class="text-sm text-btn-ink/55">Choose a location to see tile estimates.</p>
 				{:else if estimateError}
-					<p class="text-sm text-red-300">{estimateError}</p>
+					<p class="text-sm text-red-400">{estimateError}</p>
 				{:else if estimateLoading && !estimate}
-					<p class="text-sm text-stone-400">Calculating…</p>
+					<p class="text-sm text-btn-ink/55">Calculating…</p>
 				{:else if estimate}
 					<dl class="space-y-2 text-sm">
 						<div class="flex justify-between gap-4">
-							<dt class="text-stone-400">Location</dt>
+							<dt class="text-btn-ink/55">Location</dt>
 							<dd class="text-right">{center.lat.toFixed(4)}, {center.lng.toFixed(4)}</dd>
 						</div>
 						<div class="flex justify-between gap-4">
-							<dt class="text-stone-400">Tile zoom</dt>
+							<dt class="text-btn-ink/55">Tile zoom</dt>
 							<dd>{clampTileZoom(estimate.zoom)} (auto)</dd>
 						</div>
 						<div class="flex justify-between gap-4">
-							<dt class="text-stone-400">Tiles</dt>
+							<dt class="text-btn-ink/55">Tiles</dt>
 							<dd>{estimate.tileCount}</dd>
 						</div>
 						<div class="flex justify-between gap-4">
-							<dt class="text-stone-400">Map image</dt>
+							<dt class="text-btn-ink/55">Map image</dt>
 							<dd>
 								~{(mode === 'map'
 									? Math.round(Number(squareSidePx))
@@ -930,7 +930,7 @@
 						</div>
 						{#if mode === 'globe'}
 							<div class="flex justify-between gap-4">
-								<dt class="text-stone-400">Strip size</dt>
+								<dt class="text-btn-ink/55">Strip size</dt>
 								<dd class="text-right">
 									{formatStripePrintSizeCm(estimate.stripeWidthPx, estimate.stripeHeightPx) ??
 										`${estimate.stripeWidthPx} × ${estimate.stripeHeightPx} px`}
@@ -939,11 +939,11 @@
 						{/if}
 					</dl>
 				{:else}
-					<p class="text-sm text-stone-400">Calculating…</p>
+					<p class="text-sm text-btn-ink/55">Calculating…</p>
 				{/if}
 			</div>
 
-			<div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
+			<div class="rounded-2xl bg-panel p-5 shadow-sm ring-1 ring-line">
 				<MapLayerControls bind:value={mapLayers} emptyFillOnly={!!uploadedMapUrl} />
 			</div>
 		</aside>

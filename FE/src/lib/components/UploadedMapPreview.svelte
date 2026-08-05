@@ -10,7 +10,7 @@
 </script>
 
 <div
-	class="group relative aspect-square w-full overflow-hidden rounded-xl border border-stone-300 bg-stone-100 shadow-inner"
+	class="group relative aspect-square w-full overflow-hidden rounded-xl border border-line-strong bg-panel-muted shadow-inner"
 >
 	<img
 		{src}
@@ -20,7 +20,7 @@
 	<button
 		type="button"
 		onclick={onclear}
-		class="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-stone-900/75 text-white opacity-0 shadow-md ring-1 ring-white/20 transition group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+		class="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-btn/75 text-btn-ink opacity-0 shadow-md ring-1 ring-white/20 transition group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
 		aria-label="Remove uploaded map"
 		title="Remove uploaded map"
 	>
@@ -40,7 +40,7 @@
 	</button>
 	{#if filename}
 		<p
-			class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-stone-900/70 to-transparent px-3 pt-8 pb-2 text-xs text-white opacity-0 transition group-hover:opacity-100"
+			class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-3 pt-8 pb-2 text-xs text-white opacity-0 transition group-hover:opacity-100"
 		>
 			{filename}
 		</p>

@@ -630,20 +630,20 @@
 		class="relative overflow-hidden bg-black {variant === 'stage'
 			? 'h-full w-full rounded-none ring-0'
 			: isFullscreen
-				? 'h-screen w-screen rounded-none ring-1 ring-stone-800'
-				: 'h-[min(50vh,28rem)] w-full rounded-lg ring-1 ring-stone-800'}"
+				? 'h-screen w-screen rounded-none ring-1 ring-line-strong'
+				: 'h-[min(50vh,28rem)] w-full rounded-lg ring-1 ring-line-strong'}"
 	>
 		<div bind:this={container} class="h-full w-full" aria-label={title}></div>
 		{#if statusMessage}
 			<p
-				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-4 text-center text-sm text-stone-200"
+				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-4 text-center text-sm text-ink"
 			>
 				{statusMessage}
 			</p>
 		{/if}
 		{#if variant === 'stage'}
 			<p
-				class="pointer-events-none absolute inset-x-0 bottom-3 z-10 text-center text-xs text-stone-200/45"
+				class="pointer-events-none absolute inset-x-0 bottom-3 z-10 text-center text-xs text-ink/45"
 			>
 				Drag to orbit · scroll to zoom
 			</p>
@@ -654,7 +654,7 @@
 				onclick={toggleFullscreen}
 				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
 				title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-				class="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-stone-700 shadow-md ring-1 ring-stone-300/80 backdrop-blur-sm transition hover:bg-white"
+				class="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
 			>
 				{#if isFullscreen}
 					<svg
@@ -695,6 +695,6 @@
 		{/if}
 	</div>
 	{#if variant !== 'stage'}
-		<p class="text-xs text-stone-400">Drag to orbit · scroll to zoom</p>
+		<p class="text-xs text-ink-subtle">Drag to orbit · scroll to zoom</p>
 	{/if}
 </div>

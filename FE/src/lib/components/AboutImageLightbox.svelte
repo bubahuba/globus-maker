@@ -97,7 +97,7 @@
 
 {#if open && current}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/80 p-4 sm:p-6"
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 sm:p-6"
 		role="presentation"
 		onclick={onBackdropClick}
 	>
@@ -113,7 +113,7 @@
 				type="button"
 				onclick={onClose}
 				data-autofocus
-				class="absolute top-0 right-0 z-10 -mt-1 -mr-1 rounded-full bg-stone-900/70 p-2 text-stone-100 transition hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 sm:top-2 sm:right-2"
+				class="absolute top-0 right-0 z-10 -mt-1 -mr-1 rounded-full bg-btn/70 p-2 text-btn-ink transition hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:top-2 sm:right-2"
 				aria-label="Close"
 			>
 				<svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -127,7 +127,7 @@
 				<button
 					type="button"
 					onclick={goPrev}
-					class="absolute top-1/2 left-0 z-10 flex -translate-y-1/2 rounded-full bg-stone-900/70 p-2 text-stone-100 transition hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 sm:p-2.5 sm:-ml-1 lg:-ml-3"
+					class="absolute top-1/2 left-0 z-10 flex -translate-y-1/2 rounded-full bg-btn/70 p-2 text-btn-ink transition hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-2.5 sm:-ml-1 lg:-ml-3"
 					aria-label="Previous image"
 				>
 					<svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -141,7 +141,7 @@
 				<button
 					type="button"
 					onclick={goNext}
-					class="absolute top-1/2 right-0 z-10 flex -translate-y-1/2 rounded-full bg-stone-900/70 p-2 text-stone-100 transition hover:bg-amber-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 sm:p-2.5 sm:-mr-1 lg:-mr-3"
+					class="absolute top-1/2 right-0 z-10 flex -translate-y-1/2 rounded-full bg-btn/70 p-2 text-btn-ink transition hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-2.5 sm:-mr-1 lg:-mr-3"
 					aria-label="Next image"
 				>
 					<svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -162,7 +162,7 @@
 				/>
 				<figcaption
 					id={captionId}
-					class="mt-4 max-w-2xl px-2 text-center text-sm text-stone-200 sm:text-base"
+					class="mt-4 max-w-2xl px-2 text-center text-sm text-ink sm:text-base"
 				>
 					{current.caption}
 				</figcaption>

@@ -338,14 +338,14 @@
 </script>
 
 <div
-	class="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 shadow-sm"
+	class="rounded-xl border border-line bg-panel-muted px-4 py-3 shadow-sm"
 	id="job-section"
 	aria-live="polite"
 >
 	<div class="flex flex-wrap items-start justify-between gap-3">
 		<div class="min-w-0 flex-1">
 			<div class="flex flex-wrap items-center gap-2">
-				<h2 class="text-sm font-semibold text-stone-900">{statusLabels[status]}</h2>
+				<h2 class="text-sm font-semibold text-ink">{statusLabels[status]}</h2>
 				{#if status === 'queued' && queueTag}
 					<span
 						class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-900 ring-1 ring-sky-200"
@@ -360,7 +360,7 @@
 					</span>
 				{:else if isProcessing}
 					<span
-						class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200"
+						class="rounded-full bg-accent-soft-strong px-2 py-0.5 text-xs font-medium text-accent-ink ring-1 ring-line-strong"
 					>
 						{progress}%
 					</span>
@@ -379,7 +379,7 @@
 				{/if}
 			</div>
 			{#if stepDetail}
-				<p class="mt-1 text-sm text-stone-700">{stepDetail}</p>
+				<p class="mt-1 text-sm text-ink-secondary">{stepDetail}</p>
 			{/if}
 			{#if status === 'queued'}
 				<p class="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-950 ring-1 ring-sky-100">
@@ -387,9 +387,9 @@
 					removes your job from the processor queue.
 				</p>
 			{/if}
-			<p class="mt-1 font-mono text-[11px] text-stone-500">
+			<p class="mt-1 font-mono text-[11px] text-ink-subtle">
 				{#if jobId}
-					<a href="?job={jobId}" class="underline decoration-stone-300 hover:text-stone-800">
+					<a href="?job={jobId}" class="underline decoration-line-strong hover:text-ink">
 						{jobId}
 					</a>
 				{:else}
@@ -403,12 +403,12 @@
 				type="button"
 				onclick={onDownloadClick}
 				disabled={downloading}
-				class="shrink-0 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
+				class="shrink-0 rounded-lg bg-btn px-4 py-2 text-sm font-medium text-btn-ink hover:bg-btn-hover disabled:cursor-not-allowed disabled:bg-btn-disabled"
 			>
 				{downloading ? 'Downloading…' : `Download ${paidDownloadName ?? 'zip'}`}
 			</button>
 		{:else if status === 'complete' && jobId && !artifactsAvailable}
-			<p class="shrink-0 text-sm text-stone-500">Server files removed after download.</p>
+			<p class="shrink-0 text-sm text-ink-subtle">Server files removed after download.</p>
 		{/if}
 	</div>
 
@@ -418,13 +418,13 @@
 
 	<div class="mt-3 space-y-2">
 		<div>
-			<div class="mb-1 flex items-center justify-between text-[11px] text-stone-500">
+			<div class="mb-1 flex items-center justify-between text-[11px] text-ink-subtle">
 				<span>Overall progress</span>
 				<span>{progress}%</span>
 			</div>
-			<div class="h-2 overflow-hidden rounded-full bg-stone-200">
+			<div class="h-2 overflow-hidden rounded-full bg-line">
 				<div
-					class="h-full rounded-full bg-amber-700 transition-all duration-300"
+					class="h-full rounded-full bg-progress transition-all duration-300"
 					style:width="{progress}%"
 				></div>
 			</div>
@@ -432,13 +432,13 @@
 
 		{#if isProcessing && stepPercent != null}
 			<div>
-				<div class="mb-1 flex items-center justify-between text-[11px] text-stone-500">
+				<div class="mb-1 flex items-center justify-between text-[11px] text-ink-subtle">
 					<span>Current step</span>
 					<span>{stepPercent}%</span>
 				</div>
-				<div class="h-1.5 overflow-hidden rounded-full bg-stone-200">
+				<div class="h-1.5 overflow-hidden rounded-full bg-line">
 					<div
-						class="h-full rounded-full bg-amber-500 transition-all duration-300"
+						class="h-full rounded-full bg-progress-soft transition-all duration-300"
 						style:width="{stepPercent}%"
 					></div>
 				</div>
@@ -459,17 +459,17 @@
 						'done'
 							? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
 							: state === 'active'
-								? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300'
+								? 'bg-accent-soft-strong text-accent-ink ring-1 ring-accent'
 								: state === 'failed'
 									? 'bg-red-100 text-red-800 ring-1 ring-red-200'
-									: 'bg-white text-stone-500 ring-1 ring-stone-200'}"
+									: 'bg-panel text-ink-subtle ring-1 ring-line'}"
 					>
 						{#if state === 'done'}
 							<span aria-hidden="true">✓</span>
 						{:else if state === 'failed'}
 							<span aria-hidden="true">!</span>
 						{:else if state === 'active'}
-							<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-700" aria-hidden="true"></span>
+							<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-progress" aria-hidden="true"></span>
 						{/if}
 						{step.label}
 						{#if state === 'active' && step.status === 'queued' && queueTag}
@@ -486,7 +486,7 @@
 	{#if error}
 		<p
 			class="mt-3 rounded-lg px-3 py-2 text-sm ring-1 {error === 'Cancelled'
-				? 'bg-stone-100 text-stone-700 ring-stone-200'
+				? 'bg-panel-muted text-ink-secondary ring-line'
 				: 'bg-red-50 text-red-700 ring-red-100'}"
 		>
 			{error === 'Cancelled'

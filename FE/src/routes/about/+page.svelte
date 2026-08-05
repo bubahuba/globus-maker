@@ -107,11 +107,11 @@
 
 <main class="mx-auto max-w-6xl px-4 py-10 sm:py-14">
 	<header class="max-w-2xl space-y-3">
-		<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">About</p>
-		<h1 class="text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl">
+		<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">About</p>
+		<h1 class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
 			Your place, as a map or a globe
 		</h1>
-		<p class="text-lg leading-relaxed text-stone-600">
+		<p class="text-lg leading-relaxed text-ink-secondary">
 			Pick any spot on the map. Globus Maker builds a clean OpenStreetMap export you can print
 			flat, or cut into stripes for a physical globe. Quiet natural colors — or push every layer
 			into something unexpected.
@@ -120,11 +120,11 @@
 
 	<section class="mt-14 space-y-6" aria-labelledby="map-mode-heading">
 		<div class="max-w-2xl space-y-3">
-			<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Map mode</p>
-			<h2 id="map-mode-heading" class="text-2xl font-semibold text-stone-900">
+			<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">Map mode</p>
+			<h2 id="map-mode-heading" class="text-2xl font-semibold text-ink">
 				Square map for print
 			</h2>
-			<p class="leading-relaxed text-stone-600">
+			<p class="leading-relaxed text-ink-secondary">
 				Choose a center and size, tune layers and colors, then download a square SVG or JPEG.
 				Hang it as a framed print, light it from behind, or go full poster with saturated
 				custom hues.
@@ -133,10 +133,10 @@
 
 		<div class="grid gap-5 sm:grid-cols-2">
 			{#each mapImages as image, i (image.slug)}
-				<figure class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200">
+				<figure class="overflow-hidden rounded-2xl bg-panel shadow-sm ring-1 ring-line">
 					<button
 						type="button"
-						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2"
+						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
 						onclick={() => openLightbox('map', i)}
 						aria-label={`View larger: ${image.caption}`}
 					>
@@ -149,7 +149,7 @@
 							loading="lazy"
 						/>
 					</button>
-					<figcaption class="px-4 py-3 text-sm text-stone-600">{image.caption}</figcaption>
+					<figcaption class="px-4 py-3 text-sm text-ink-secondary">{image.caption}</figcaption>
 				</figure>
 			{/each}
 		</div>
@@ -157,11 +157,11 @@
 
 	<section class="mt-16 space-y-6" aria-labelledby="globe-mode-heading">
 		<div class="max-w-2xl space-y-3">
-			<p class="text-sm font-medium tracking-wide text-amber-800 uppercase">Globe mode</p>
-			<h2 id="globe-mode-heading" class="text-2xl font-semibold text-stone-900">
+			<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">Globe mode</p>
+			<h2 id="globe-mode-heading" class="text-2xl font-semibold text-ink">
 				Meridian stripes for a sphere
 			</h2>
-			<p class="leading-relaxed text-stone-600">
+			<p class="leading-relaxed text-ink-secondary">
 				Same city map, remapped for a globe. You get print-ready JPEG stripes (plus pole caps)
 				sized to your diameter — wrap a lamp, build a sphere, or flood the room with soft
 				(or wildly colorful) city light.
@@ -171,12 +171,12 @@
 		<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
 			{#each globeImages as image, i (image.slug)}
 				<figure
-					class="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200
+					class="overflow-hidden rounded-2xl bg-panel shadow-sm ring-1 ring-line
 						{i === 0 || i === 3 ? 'sm:col-span-2 lg:col-span-3' : ''}"
 				>
 					<button
 						type="button"
-						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800 focus-visible:ring-offset-2"
+						class="group block w-full cursor-zoom-in text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
 						onclick={() => openLightbox('globe', i)}
 						aria-label={`View larger: ${image.caption}`}
 					>
@@ -193,34 +193,34 @@
 							loading="lazy"
 						/>
 					</button>
-					<figcaption class="px-4 py-3 text-sm text-stone-600">{image.caption}</figcaption>
+					<figcaption class="px-4 py-3 text-sm text-ink-secondary">{image.caption}</figcaption>
 				</figure>
 			{/each}
 		</div>
 	</section>
 
 	<section
-		class="mt-16 rounded-2xl bg-white px-6 py-8 shadow-sm ring-1 ring-stone-200 sm:px-8"
+		class="mt-16 rounded-2xl bg-panel px-6 py-8 shadow-sm ring-1 ring-line sm:px-8"
 		aria-labelledby="how-it-works-heading"
 	>
-		<h2 id="how-it-works-heading" class="text-xl font-semibold text-stone-900">How it works</h2>
+		<h2 id="how-it-works-heading" class="text-xl font-semibold text-ink">How it works</h2>
 		<ol class="mt-5 grid gap-4 sm:grid-cols-3">
 			<li class="space-y-1">
-				<p class="text-sm font-semibold text-amber-900">1. Place</p>
-				<p class="text-sm leading-relaxed text-stone-600">
+				<p class="text-sm font-semibold text-accent-ink">1. Place</p>
+				<p class="text-sm leading-relaxed text-ink-secondary">
 					Search a city or click the map. Set how wide the square should be.
 				</p>
 			</li>
 			<li class="space-y-1">
-				<p class="text-sm font-semibold text-amber-900">2. Style</p>
-				<p class="text-sm leading-relaxed text-stone-600">
+				<p class="text-sm font-semibold text-accent-ink">2. Style</p>
+				<p class="text-sm leading-relaxed text-ink-secondary">
 					Toggle streets, water, buildings, and labels. Soft natural tones or bold custom
 					colors — your call.
 				</p>
 			</li>
 			<li class="space-y-1">
-				<p class="text-sm font-semibold text-amber-900">3. Download</p>
-				<p class="text-sm leading-relaxed text-stone-600">
+				<p class="text-sm font-semibold text-accent-ink">3. Download</p>
+				<p class="text-sm leading-relaxed text-ink-secondary">
 					Get a square map file, or a zip of globe stripes ready to print and assemble.
 				</p>
 			</li>
@@ -228,7 +228,7 @@
 		<p class="mt-8">
 			<a
 				href="/"
-				class="inline-flex items-center rounded-xl bg-amber-800 px-4 py-2.5 text-sm font-medium text-amber-50 transition hover:bg-amber-900"
+				class="inline-flex items-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-contrast transition hover:bg-accent-hover"
 			>
 				Open Globus Maker App
 			</a>

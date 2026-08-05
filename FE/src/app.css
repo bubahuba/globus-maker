@@ -1,8 +1,68 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/*
+ * Semantic surfaces — flip with the OS color scheme (no manual toggle).
+ * Utilities: bg-canvas, bg-panel, text-ink, border-line, bg-accent, …
+ */
+@theme {
+	--color-canvas: #f4f1ea;
+	--color-panel: #ffffff;
+	--color-panel-muted: #f5f5f4;
+	--color-ink: #1c1917;
+	--color-ink-secondary: #57534e;
+	--color-ink-subtle: #78716c;
+	--color-line: #e7e5e4;
+	--color-line-strong: #d6d3d1;
+	--color-accent: #92400e;
+	--color-accent-hover: #78350f;
+	--color-accent-soft: #fffbeb;
+	--color-accent-soft-strong: #fef3c7;
+	--color-accent-ink: #78350f;
+	--color-accent-ink-strong: #451a03;
+	--color-accent-contrast: #fffbeb;
+	--color-control: #ffffff;
+	--color-btn: #1c1917;
+	--color-btn-hover: #292524;
+	--color-btn-ink: #ffffff;
+	--color-btn-disabled: #a8a29e;
+	--color-overlay: rgb(28 25 23 / 0.4);
+	--color-progress: #b45309;
+	--color-progress-soft: #f59e0b;
+}
+
+@layer theme {
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--color-canvas: #141210;
+			--color-panel: #1c1917;
+			--color-panel-muted: #292524;
+			--color-ink: #f5f5f4;
+			--color-ink-secondary: #a8a29e;
+			--color-ink-subtle: #a8a29e;
+			--color-line: #44403c;
+			--color-line-strong: #57534e;
+			--color-accent: #fbbf24;
+			--color-accent-hover: #fcd34d;
+			--color-accent-soft: #292524;
+			--color-accent-soft-strong: #44403c;
+			--color-accent-ink: #fde68a;
+			--color-accent-ink-strong: #fef3c7;
+			--color-accent-contrast: #1c1917;
+			--color-control: #292524;
+			--color-btn: #f5f5f4;
+			--color-btn-hover: #e7e5e4;
+			--color-btn-ink: #1c1917;
+			--color-btn-disabled: #57534e;
+			--color-overlay: rgb(0 0 0 / 0.55);
+			--color-progress: #f59e0b;
+			--color-progress-soft: #fbbf24;
+		}
+	}
+}
 
 :root {
-	color-scheme: light;
-	font-family: "IBM Plex Sans", system-ui, sans-serif;
+	color-scheme: light dark;
+	font-family: 'IBM Plex Sans', system-ui, sans-serif;
 }
 
 html {
@@ -11,8 +71,8 @@ html {
 
 body {
 	margin: 0;
-	background: #f4f1ea;
-	color: #1f2933;
+	background: var(--color-canvas);
+	color: var(--color-ink);
 }
 
 .leaflet-container {

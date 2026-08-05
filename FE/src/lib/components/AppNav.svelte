@@ -22,12 +22,12 @@
 </script>
 
 <header
-	class="sticky top-0 z-50 border-b border-stone-200/80 bg-[#f4f1ea]/90 backdrop-blur-md"
+	class="sticky top-0 z-50 border-b border-line/80 bg-canvas/90 backdrop-blur-md"
 >
 	<div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
 		<a
 			href="/"
-			class="inline-flex items-center gap-2.5 text-sm font-semibold tracking-wide text-stone-900 transition hover:text-amber-800"
+			class="inline-flex items-center gap-2.5 text-sm font-semibold tracking-wide text-ink transition hover:text-accent-ink"
 			onclick={closeMenu}
 		>
 			<img
@@ -35,7 +35,7 @@
 				alt=""
 				width="32"
 				height="32"
-				class="h-8 w-8 rounded-lg shadow-sm ring-1 ring-stone-200/80"
+				class="h-8 w-8 rounded-lg shadow-sm ring-1 ring-line/80"
 				decoding="async"
 			/>
 			<span>Globus Maker</span>
@@ -47,8 +47,8 @@
 					href={link.href}
 					class="rounded-lg px-3 py-2 text-sm font-medium transition
 						{isActive(link.href)
-						? 'bg-amber-100 text-amber-950'
-						: 'text-stone-600 hover:bg-stone-100 hover:text-stone-900'}"
+						? 'bg-accent-soft-strong text-accent-ink-strong'
+						: 'text-ink-secondary hover:bg-panel-muted hover:text-ink'}"
 					aria-current={isActive(link.href) ? 'page' : undefined}
 				>
 					{link.label}
@@ -58,7 +58,7 @@
 
 		<button
 			type="button"
-			class="inline-flex items-center justify-center rounded-lg p-2 text-stone-700 transition hover:bg-stone-100 sm:hidden"
+			class="inline-flex items-center justify-center rounded-lg p-2 text-ink-secondary transition hover:bg-panel-muted sm:hidden"
 			aria-expanded={menuOpen}
 			aria-controls="mobile-nav"
 			aria-label={menuOpen ? 'Close menu' : 'Open menu'}
@@ -87,7 +87,7 @@
 	{#if menuOpen}
 		<nav
 			id="mobile-nav"
-			class="border-t border-stone-200/80 bg-[#f4f1ea] px-4 py-3 sm:hidden"
+			class="border-t border-line/80 bg-canvas px-4 py-3 sm:hidden"
 			aria-label="Main mobile"
 		>
 			<ul class="flex flex-col gap-1">
@@ -97,8 +97,8 @@
 							href={link.href}
 							class="block rounded-lg px-3 py-2.5 text-sm font-medium transition
 								{isActive(link.href)
-								? 'bg-amber-100 text-amber-950'
-								: 'text-stone-600 hover:bg-stone-100 hover:text-stone-900'}"
+								? 'bg-accent-soft-strong text-accent-ink-strong'
+								: 'text-ink-secondary hover:bg-panel-muted hover:text-ink'}"
 							aria-current={isActive(link.href) ? 'page' : undefined}
 							onclick={closeMenu}
 						>

@@ -76,7 +76,7 @@
 
 <div class="relative z-30 isolate px-0.5 pt-0.5">
 	<label class="block space-y-1" for="place-search">
-		<span class="text-sm font-medium text-stone-700">Find a place</span>
+		<span class="text-sm font-medium text-ink-secondary">Find a place</span>
 		<div class="relative">
 			<input
 				id="place-search"
@@ -89,19 +89,19 @@
 				}}
 				onblur={onBlur}
 				autocomplete="off"
-				class="relative z-10 w-full rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm text-stone-900 shadow-sm outline-none ring-amber-700/30 focus:ring-2"
+				class="relative z-10 w-full rounded-xl border border-line-strong bg-panel px-4 py-2.5 text-sm text-ink shadow-sm outline-none ring-accent/30 focus:ring-2"
 			/>
 
 			{#if open && results.length > 0}
 				<ul
 					id="place-search-results"
-					class="absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-y-auto overscroll-contain rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+					class="absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-y-auto overscroll-contain rounded-xl border border-line bg-panel py-1 shadow-lg"
 				>
 					{#each results as result (result.placeId)}
 						<li>
 							<button
 								type="button"
-								class="w-full px-4 py-2 text-left text-sm text-stone-800 hover:bg-amber-50"
+								class="w-full px-4 py-2 text-left text-sm text-ink hover:bg-accent-soft"
 								onmousedown={(event) => {
 									event.preventDefault();
 									pickResult(result);
@@ -118,7 +118,7 @@
 
 	<div class="min-h-5 pt-1" aria-live="polite">
 		{#if searching}
-			<p class="text-xs text-stone-500">Searching…</p>
+			<p class="text-xs text-ink-subtle">Searching…</p>
 		{:else if searchError}
 			<p class="text-xs text-red-600">{searchError}</p>
 		{/if}

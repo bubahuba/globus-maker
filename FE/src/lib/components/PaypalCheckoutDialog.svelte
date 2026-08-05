@@ -282,51 +282,51 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-4 sm:items-center"
+		class="fixed inset-0 z-50 flex items-end justify-center bg-overlay p-4 sm:items-center"
 		role="presentation"
 		onclick={onBackdropClick}
 	>
 		<div
 			{@attach dialogPanel}
-			class="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-stone-200"
+			class="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-panel shadow-xl ring-1 ring-line"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby={titleId}
 			aria-describedby={descId}
 		>
 			<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
-				<h2 id={titleId} class="text-lg font-semibold text-stone-900">
+				<h2 id={titleId} class="text-lg font-semibold text-ink">
 					Download globe stripes
 				</h2>
-				<p id={descId} class="mt-2 text-sm leading-relaxed text-stone-600">
+				<p id={descId} class="mt-2 text-sm leading-relaxed text-ink-secondary">
 					Making globe strips takes a bit more work than a flat map. Pay once to download
 					everything — the square map, pole caps, printable strips, and a short README.
 					{#if filename}
-						<span class="mt-1 block font-mono text-xs text-stone-500">{filename}</span>
+						<span class="mt-1 block font-mono text-xs text-ink-subtle">{filename}</span>
 					{/if}
 					{#if config?.mode === 'sandbox'}
-						<span class="mt-1 block text-xs text-amber-800">Sandbox mode — no real charge.</span>
+						<span class="mt-1 block text-xs text-accent-ink">Sandbox mode — no real charge.</span>
 					{/if}
 				</p>
 
 				<div
-					class="mt-4 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-100"
+					class="mt-4 rounded-xl bg-accent-soft px-4 py-3 ring-1 ring-accent-soft-strong"
 					aria-live="polite"
 				>
 					<div class="flex items-baseline justify-between gap-3">
 						<div>
-							<p class="text-xs font-medium tracking-wide text-amber-900/70 uppercase">
+							<p class="text-xs font-medium tracking-wide text-accent-ink/70 uppercase">
 								Price for this globe
 							</p>
 							{#if diameterLabel}
-								<p class="mt-0.5 text-sm text-stone-600">
+								<p class="mt-0.5 text-sm text-ink-secondary">
 									{diameterLabel} diameter · €2–€6 by size
 								</p>
 							{:else}
-								<p class="mt-0.5 text-sm text-stone-600">€2 at 20 cm → €6 at 60 cm</p>
+								<p class="mt-0.5 text-sm text-ink-secondary">€2 at 20 cm → €6 at 60 cm</p>
 							{/if}
 						</div>
-						<p class="text-2xl font-semibold tabular-nums text-stone-900">{amountLabel}</p>
+						<p class="text-2xl font-semibold tabular-nums text-ink">{amountLabel}</p>
 					</div>
 				</div>
 
@@ -336,11 +336,11 @@
 							{loadError}
 						</p>
 					{:else if busy === 'sdk'}
-						<p class="text-sm text-stone-500">Loading PayPal…</p>
+						<p class="text-sm text-ink-subtle">Loading PayPal…</p>
 					{/if}
 					<div {@attach paypalButtonsHost} class="w-full" data-autofocus></div>
 					{#if busy === 'pay' || busy === 'paid'}
-						<p class="mt-2 text-sm text-stone-600">
+						<p class="mt-2 text-sm text-ink-secondary">
 							{busy === 'paid' ? `Downloading ${zipLabel}…` : 'Confirming payment…'}
 						</p>
 					{/if}
@@ -354,7 +354,7 @@
 					type="button"
 					onclick={shareJobUrl}
 					disabled={busy != null}
-					class="mt-4 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-amber-800 hover:bg-amber-50 hover:text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
+					class="mt-4 w-full rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary transition hover:border-accent hover:bg-accent-soft hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					{shareCopied ? 'Link copied!' : 'Share job url'}
 				</button>
@@ -363,7 +363,7 @@
 					type="button"
 					onclick={confirmFreeDownload}
 					disabled={busy != null}
-					class="mt-3 w-full rounded-lg px-3 py-2 text-sm text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+					class="mt-3 w-full rounded-lg px-3 py-2 text-sm text-ink-secondary underline decoration-line-strong underline-offset-2 hover:text-ink disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
 				>
 					{busy === 'free' ? 'Downloading…' : 'Download map SVG without paying'}
 				</button>
@@ -372,7 +372,7 @@
 					type="button"
 					onclick={close}
 					disabled={busy === 'pay' || busy === 'paid'}
-					class="mt-2 w-full rounded-lg px-3 py-1.5 text-xs text-stone-500 hover:text-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-50"
+					class="mt-2 w-full rounded-lg px-3 py-1.5 text-xs text-ink-subtle hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-line-strong disabled:opacity-50"
 				>
 					Cancel
 				</button>

@@ -264,16 +264,16 @@
 
 <div
 	bind:this={rootEl}
-	class="relative z-1 h-full w-full {isFullscreen ? 'bg-stone-900' : 'bg-stone-100'}"
+	class="relative z-1 h-full w-full {isFullscreen ? 'bg-black' : 'bg-panel-muted'}"
 >
 	<!-- z-0 isolates Leaflet/MapLibre pane z-indexes so overlays stay clickable -->
 	<div bind:this={mapEl} class="absolute inset-0 z-0"></div>
 
 	{#if !center}
 		<div
-			class="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-stone-900/10 px-6 text-center"
+			class="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-ink/10 px-6 text-center"
 		>
-			<p class="rounded-lg bg-white/95 px-4 py-2 text-sm text-stone-700 shadow-sm">
+			<p class="rounded-lg bg-panel/95 px-4 py-2 text-sm text-ink-secondary shadow-sm">
 				Search for a place or click the map to select your region
 			</p>
 		</div>
@@ -288,7 +288,7 @@
 				onclick={toggleFullscreen}
 				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
 				title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-				class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50"
+				class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-panel text-ink-secondary shadow-md ring-1 ring-line-strong transition hover:bg-panel-muted"
 			>
 				{#if isFullscreen}
 					<svg
@@ -334,7 +334,7 @@
 			disabled={!canShrinkSide}
 			aria-label="Zoom in"
 			title="Zoom in"
-			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-panel text-ink-secondary shadow-md ring-1 ring-line-strong transition hover:bg-panel-muted disabled:cursor-not-allowed disabled:opacity-40"
 		>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
@@ -357,7 +357,7 @@
 			disabled={!canGrowSide}
 			aria-label="Zoom out"
 			title="Zoom out"
-			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white text-stone-700 shadow-md ring-1 ring-stone-300 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+			class="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-lg bg-panel text-ink-secondary shadow-md ring-1 ring-line-strong transition hover:bg-panel-muted disabled:cursor-not-allowed disabled:opacity-40"
 		>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"

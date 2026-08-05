@@ -248,13 +248,13 @@
 {#if visible && jobId}
 	<section
 		id="job-outputs"
-		class="w-full space-y-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200"
+		class="w-full space-y-5 rounded-2xl bg-panel p-5 shadow-sm ring-1 ring-line"
 	>
 		<div class="space-y-1">
-			<h2 class="text-lg font-medium text-stone-900">
+			<h2 class="text-lg font-medium text-ink">
 				{effectiveMode === 'globe' ? 'Your globe files' : 'Generated files'}
 			</h2>
-			<p class="text-sm text-stone-500">
+			<p class="text-sm text-ink-subtle">
 				{#if !artifactsAvailable && status === 'complete'}
 					Server copies were removed after download to free disk space. Your download is on your
 					device.
@@ -268,23 +268,23 @@
 			<div class="grid gap-4 md:grid-cols-2">
 				{#each readyMaps as slot (`${jobId}-${slot.filename}`)}
 					<div class="space-y-2">
-						<p class="text-sm font-medium text-stone-700">{slot.label}</p>
+						<p class="text-sm font-medium text-ink-secondary">{slot.label}</p>
 						{#if slot.ready}
 							<img
 								src={urlFor(slot.filename)}
 								alt={slot.label}
-								class="w-full max-h-[min(70vh,36rem)] rounded-lg object-contain ring-1 ring-stone-200 {mapCanvasColor
+								class="w-full max-h-[min(70vh,36rem)] rounded-lg object-contain ring-1 ring-line {mapCanvasColor
 									? ''
-									: 'bg-stone-50'}"
+									: 'bg-panel-muted'}"
 								style:background-color={mapCanvasColor ?? undefined}
 							/>
-							<p class="text-xs text-stone-400">{slot.filename}</p>
+							<p class="text-xs text-ink-subtle">{slot.filename}</p>
 						{:else}
 							<div
 								class="{placeholderClass(
 									activePlaceholder?.kind === 'map' &&
 										activePlaceholder.filename === slot.filename
-								)} flex h-[min(40vh,20rem)] items-center justify-center rounded-lg text-sm text-stone-400 ring-1 ring-stone-200"
+								)} flex h-[min(40vh,20rem)] items-center justify-center rounded-lg text-sm text-ink-subtle ring-1 ring-line"
 								role="status"
 								aria-label={status === 'complete' ? 'Map preview unavailable' : 'Waiting for map'}
 								aria-busy={activePlaceholder?.kind === 'map' &&
@@ -302,8 +302,8 @@
 			{#if effectiveMode === 'globe'}
 				{#if spherePreviewFile && jobId}
 					<div class="space-y-2">
-						<h3 class="text-base font-medium text-stone-900">Globe preview</h3>
-						<p class="text-sm text-stone-500">
+						<h3 class="text-base font-medium text-ink">Globe preview</h3>
+						<p class="text-sm text-ink-subtle">
 							A rough idea of how your map wraps around a ball. The place you picked sits at the
 							top.
 						</p>
@@ -317,10 +317,10 @@
 					</div>
 				{:else if (stitchedReady || readyStripes.length > 0) && status !== 'complete' && status !== 'failed'}
 					<div class="space-y-2">
-						<h3 class="text-base font-medium text-stone-900">Globe preview</h3>
-						<p class="text-sm text-stone-500">Building a quick wrap-around preview…</p>
+						<h3 class="text-base font-medium text-ink">Globe preview</h3>
+						<p class="text-sm text-ink-subtle">Building a quick wrap-around preview…</p>
 						<div
-							class="{placeholderClass(activePlaceholder?.kind === 'sphere')} h-[min(40vh,20rem)] w-full rounded-lg ring-1 ring-stone-200"
+							class="{placeholderClass(activePlaceholder?.kind === 'sphere')} h-[min(40vh,20rem)] w-full rounded-lg ring-1 ring-line"
 							role="status"
 							aria-label="Waiting for sphere preview"
 							aria-busy={activePlaceholder?.kind === 'sphere'}
@@ -330,8 +330,8 @@
 
 				{#if showPoleCapsSlot}
 					<div class="space-y-2">
-						<h3 class="text-base font-medium text-stone-900">Pole caps</h3>
-						<p class="text-sm text-stone-500">
+						<h3 class="text-base font-medium text-ink">Pole caps</h3>
+						<p class="text-sm text-ink-subtle">
 							Two round pieces for the top and bottom of the globe. Cut along the yellow circle;
 							the small dot marks the centre.
 						</p>
@@ -339,14 +339,14 @@
 							<img
 								src={urlFor(poleCapsFile)}
 								alt="Pole caps"
-								class="mx-auto w-full max-w-2xl max-h-[min(50vh,24rem)] rounded-lg bg-stone-50 object-contain ring-1 ring-stone-200"
+								class="mx-auto w-full max-w-2xl max-h-[min(50vh,24rem)] rounded-lg bg-panel-muted object-contain ring-1 ring-line"
 							/>
-							<p class="text-xs text-stone-400">{poleCapsFile}</p>
+							<p class="text-xs text-ink-subtle">{poleCapsFile}</p>
 						{:else}
 							<div
 								class="{placeholderClass(
 									activePlaceholder?.kind === 'pole-caps'
-								)} mx-auto h-[min(40vh,16rem)] w-full max-w-2xl rounded-lg ring-1 ring-stone-200"
+								)} mx-auto h-[min(40vh,16rem)] w-full max-w-2xl rounded-lg ring-1 ring-line"
 								role="status"
 								aria-label="Waiting for pole caps"
 								aria-busy={activePlaceholder?.kind === 'pole-caps'}
@@ -358,14 +358,14 @@
 				{#if stripeSlots.length > 0}
 					<div class="space-y-3">
 						<div class="space-y-1">
-							<h3 class="text-base font-medium text-stone-900">Printable strips</h3>
+							<h3 class="text-base font-medium text-ink">Printable strips</h3>
 							{#if stripePrintSizeCm}
-								<p class="text-sm text-stone-600">
+								<p class="text-sm text-ink-secondary">
 									Each strip is about {stripePrintSizeCm} — the long side runs pole to pole (half
 									the globe's circumference).
 								</p>
 							{/if}
-							<p class="text-sm text-stone-500">
+							<p class="text-sm text-ink-subtle">
 								Long pieces that wrap around the globe. Line up the wavy yellow edges when you
 								glue neighbours together.
 							</p>
@@ -383,23 +383,23 @@
 										<img
 											src={urlFor(slot.filename)}
 											alt={slot.filename}
-											class="h-auto max-h-[500px] w-full rounded-md bg-stone-50 object-contain ring-1 ring-stone-200"
+											class="h-auto max-h-[500px] w-full rounded-md bg-panel-muted object-contain ring-1 ring-line"
 										/>
-										<p class="w-full truncate text-center text-xs text-stone-500">
+										<p class="w-full truncate text-center text-xs text-ink-subtle">
 											{slot.filename}
 										</p>
 									{:else}
 										<div
 											class="{placeholderClass(
 												stripeActive
-											)} flex h-[min(40vw,460px)] w-full items-center justify-center rounded-md text-stone-400 ring-1 ring-stone-200"
+											)} flex h-[min(40vw,460px)] w-full items-center justify-center rounded-md text-ink-subtle ring-1 ring-line"
 											role="status"
 											aria-label="Waiting for stripe"
 											aria-busy={stripeActive}
 										>
 											<span class="relative z-10">…</span>
 										</div>
-										<p class="text-xs text-stone-400">Waiting…</p>
+										<p class="text-xs text-ink-subtle">Waiting…</p>
 									{/if}
 								</div>
 							{/each}
@@ -413,22 +413,22 @@
 
 <style>
 	.loading-placeholder {
-		background-color: #e7e5e4; /* stone-200 */
+		background-color: var(--color-line);
 	}
 
 	.loading-shimmer {
 		position: relative;
 		overflow: hidden;
-		background-color: #f5f5f4; /* stone-100 */
+		background-color: var(--color-panel-muted);
 		background-image: linear-gradient(
 			110deg,
-			#f5f5f4 0%,
-			#f5f5f4 35%,
-			#e7e5e4 50%,
-			#d6d3d1 55%,
-			#e7e5e4 60%,
-			#f5f5f4 75%,
-			#f5f5f4 100%
+			var(--color-panel-muted) 0%,
+			var(--color-panel-muted) 35%,
+			var(--color-line) 50%,
+			var(--color-line-strong) 55%,
+			var(--color-line) 60%,
+			var(--color-panel-muted) 75%,
+			var(--color-panel-muted) 100%
 		);
 		background-size: 200% 100%;
 		animation: shimmer 1.6s ease-in-out infinite;
@@ -447,7 +447,7 @@
 		.loading-shimmer {
 			animation: none;
 			background-image: none;
-			background-color: #e7e5e4;
+			background-color: var(--color-line);
 		}
 	}
 </style>
