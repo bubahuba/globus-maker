@@ -4,8 +4,8 @@
 	"description": "Export a square city map or globe meridian stripes from OpenStreetMap.",
 	"start_url": "/",
 	"display": "standalone",
-	"background_color": "#f4f1ea",
-	"theme_color": "#f4f1ea",
+	"background_color": "#08080c",
+	"theme_color": "#08080c",
 	"icons": [
 		{
 			"src": "/icon-192.png",
