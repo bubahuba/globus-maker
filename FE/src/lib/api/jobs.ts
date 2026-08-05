@@ -1,4 +1,10 @@
-import type { CreateJobResponse, EstimateResponse, JobRequest, JobResponse } from '../types';
+import type {
+	CreateJobResponse,
+	EstimateResponse,
+	JobRequest,
+	JobResponse,
+	LatestGlobeJobResponse
+} from '../types';
 
 export class EstimateFailure extends Error {
 	maxZoom?: number;
@@ -66,6 +72,11 @@ export async function createJob(
 export async function getJob(jobId: string): Promise<JobResponse> {
 	const response = await fetch(`/api/jobs/${jobId}`);
 	return parseJson<JobResponse>(response);
+}
+
+export async function getLatestGlobe(): Promise<LatestGlobeJobResponse> {
+	const response = await fetch('/api/jobs/latest-globe');
+	return parseJson<LatestGlobeJobResponse>(response);
 }
 
 export function downloadUrl(jobId: string, format: 'zip' | 'pdf' = 'zip'): string {

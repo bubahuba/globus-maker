@@ -3,6 +3,7 @@
 
 	const links = [
 		{ href: '/', label: 'Globus Maker App' },
+		{ href: '/latest-planet', label: 'Latest planet' },
 		{ href: '/about', label: 'About this app' }
 	] as const;
 

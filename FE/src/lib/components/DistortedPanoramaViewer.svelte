@@ -16,9 +16,20 @@
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
 		src: string;
 		title?: string;
+		/** card = job outputs panel; stage = immersive full-bleed under nav */
+		variant?: 'card' | 'stage';
+		/** When true, treat square polar map like monitor fallback (DePolar). */
+		depolarSquare?: boolean;
+		emptyFillColor?: string;
 	}
 
-	let { src, title = 'Sphere preview' }: Props = $props();
+	let {
+		src,
+		title = 'Sphere preview',
+		variant = 'card',
+		depolarSquare = false,
+		emptyFillColor = '#808080'
+	}: Props = $props();
 
 	let shellEl: HTMLDivElement | undefined = $state();
 	let container: HTMLDivElement | undefined = $state();
@@ -28,7 +39,9 @@
 	let fullscreenSupported = $state(true);
 
 	/** Path only — ignore ?v= cache-bust so stripe uploads don't remount the globe. */
-	const loadKey = $derived(src.split('?')[0] || src);
+	const loadKey = $derived(
+		`${src.split('?')[0] || src}|${variant}|${depolarSquare}|${emptyFillColor}`
+	);
 
 	function syncFullscreenState() {
 		isFullscreen = document.fullscreenElement === shellEl;
@@ -57,6 +70,7 @@
 		texture: THREE.Texture;
 		controls: OrbitControls;
 		globe: THREE.Object3D;
+		onControlsStart?: () => void;
 		starsGeometry: THREE.BufferGeometry;
 		starsMaterial: THREE.Material;
 		sunTexture: THREE.Texture;
@@ -66,6 +80,110 @@
 		atmosphereGeometry: THREE.BufferGeometry;
 		atmosphereMaterial: THREE.Material;
 	} | null = null;
+
+	function parseHex(hex: string): { r: number; g: number; b: number } | null {
+		const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+		if (!m) return null;
+		const n = parseInt(m[1], 16);
+		return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+	}
+
+	function hexToRgba(hex: string, alpha = 255): [number, number, number, number] {
+		const c = parseHex(hex);
+		if (!c) return [128, 128, 128, alpha];
+		return [c.r, c.g, c.b, alpha];
+	}
+
+	/** Bilinear sample, or null when outside the square (IM `-virtual-pixel Background`). */
+	function sampleBilinear(
+		data: Uint8ClampedArray,
+		width: number,
+		height: number,
+		x: number,
+		y: number
+	): [number, number, number, number] | null {
+		if (x < 0 || y < 0 || x > width - 1 || y > height - 1) {
+			return null;
+		}
+		const x0 = Math.floor(x);
+		const y0 = Math.floor(y);
+		const x1 = Math.min(width - 1, x0 + 1);
+		const y1 = Math.min(height - 1, y0 + 1);
+		const fx = x - x0;
+		const fy = y - y0;
+		const idx = (ix: number, iy: number) => (iy * width + ix) * 4;
+		const out: [number, number, number, number] = [0, 0, 0, 0];
+		for (let c = 0; c < 4; c++) {
+			const v00 = data[idx(x0, y0) + c];
+			const v10 = data[idx(x1, y0) + c];
+			const v01 = data[idx(x0, y1) + c];
+			const v11 = data[idx(x1, y1) + c];
+			out[c] = Math.round(
+				v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy
+			);
+		}
+		return out;
+	}
+
+	/**
+	 * ImageMagick-style DePolar (`-distort DePolar -1` + virtual-pixel Background):
+	 * centre → north (equirect top); radius to furthest corner → south.
+	 * Outside the square → empty fill — four south-pole sectors like the FE preview.
+	 */
+	function depolarSquareToEquirect(
+		srcCanvas: HTMLCanvasElement,
+		maxEdge: number,
+		fillColor: string
+	): HTMLCanvasElement {
+		const sw = srcCanvas.width;
+		const sh = srcCanvas.height;
+		const cx = sw / 2;
+		const cy = sh / 2;
+		// IM `-1`: radius is centre → furthest corner (covers whole square).
+		const maxR = Math.hypot(cx, cy);
+		const empty = hexToRgba(fillColor || '#808080');
+
+		let outW = Math.min(maxEdge, Math.max(2, Math.round(maxR * 2)));
+		if (outW % 2) outW -= 1;
+		const outH = Math.max(1, outW >> 1);
+
+		const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+		if (!srcCtx) throw new Error('Canvas unavailable');
+		const src = srcCtx.getImageData(0, 0, sw, sh).data;
+
+		const out = document.createElement('canvas');
+		out.width = outW;
+		out.height = outH;
+		const outCtx = out.getContext('2d');
+		if (!outCtx) throw new Error('Canvas unavailable');
+		const outImg = outCtx.createImageData(outW, outH);
+		const dest = outImg.data;
+
+		for (let y = 0; y < outH; y++) {
+			// Top row = centre (north pole); bottom = corner radius (south).
+			const r = (y / Math.max(1, outH - 1)) * maxR;
+			for (let x = 0; x < outW; x++) {
+				// IM DePolar: mid top row is angle 0; angles increase clockwise.
+				const angle = (x / outW - 0.5) * Math.PI * 2;
+				const sx = cx + r * Math.sin(angle);
+				const sy = cy - r * Math.cos(angle);
+				const sampled = sampleBilinear(src, sw, sh, sx, sy);
+				const [cr, cg, cb, ca] = sampled ?? empty;
+				const i = (y * outW + x) * 4;
+				dest[i] = cr;
+				dest[i + 1] = cg;
+				dest[i + 2] = cb;
+				dest[i + 3] = ca;
+			}
+		}
+		outCtx.putImageData(outImg, 0, 0);
+		return out;
+	}
+
+	/** ~2:1 already equirect (API preview); ~1:1 is a polar square map (needs DePolar). */
+	function needsDepolar(width: number, height: number): boolean {
+		return width / height < 1.5;
+	}
 
 	/**
 	 * Tip local +Y (north) toward `sunDir` by Earth's axial tilt — northern summer solstice.
@@ -255,6 +373,9 @@
 		resizeObserver?.disconnect();
 		resizeObserver = null;
 		if (sceneResources) {
+			if (sceneResources.onControlsStart) {
+				sceneResources.controls.removeEventListener('start', sceneResources.onControlsStart);
+			}
 			sceneResources.controls.dispose();
 			sceneResources.geometry.dispose();
 			sceneResources.material.dispose();
@@ -276,7 +397,10 @@
 		}
 	}
 
-	async function loadTexture(url: string): Promise<THREE.CanvasTexture> {
+	async function loadTexture(
+		url: string,
+		opts: { depolarSquare?: boolean; emptyFillColor?: string } = {}
+	): Promise<THREE.CanvasTexture> {
 		const img = new Image();
 		img.decoding = 'async';
 		img.src = url;
@@ -297,24 +421,43 @@
 		if (!ctx) throw new Error('Canvas unavailable');
 		ctx.drawImage(img, 0, 0, w, h);
 
-		const texture = new THREE.CanvasTexture(canvas);
+		const mapped =
+			opts.depolarSquare || needsDepolar(w, h)
+				? depolarSquareToEquirect(canvas, MAX_EDGE, opts.emptyFillColor || '#808080')
+				: canvas;
+
+		const texture = new THREE.CanvasTexture(mapped);
 		texture.colorSpace = THREE.SRGBColorSpace;
 		texture.anisotropy = 8;
 		return texture;
 	}
 
-	async function mountGlobe(el: HTMLDivElement, url: string) {
+	async function mountGlobe(
+		el: HTMLDivElement,
+		url: string,
+		opts: {
+			depolarSquare?: boolean;
+			emptyFillColor?: string;
+			variant?: 'card' | 'stage';
+		} = {}
+	) {
 		disposeViewer();
 		el.replaceChildren();
 		statusMessage = 'Loading preview…';
 
-		const texture = await loadTexture(url);
+		const texture = await loadTexture(url, opts);
+		const isStage = opts.variant === 'stage';
 
 		const nextScene = new THREE.Scene();
 		nextScene.background = new THREE.Color(0x000000);
 
 		const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-		camera.position.set(0, 0.35, 2.6);
+		if (isStage) {
+			// Bias toward north pole (+Y); distance set by frameGlobe().
+			camera.position.set(0, 0.95, 0.85);
+		} else {
+			camera.position.set(0, 0.35, 2.6);
+		}
 
 		const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 		webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -359,10 +502,32 @@
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.06;
-		controls.minDistance = 1.35;
-		controls.maxDistance = 5;
+		controls.minDistance = isStage ? 1.05 : 1.35;
+		controls.maxDistance = isStage ? 6 : 5;
 		controls.target.set(0, 0, 0);
+
+		/** Keep contain-framing on resize until the user orbits / zooms (stage only). */
+		let autoFrame = isStage;
+		const onControlsStart = () => {
+			autoFrame = false;
+		};
+		if (isStage) {
+			controls.addEventListener('start', onControlsStart);
+		}
 		controls.update();
+
+		/** Pull camera so the unit sphere fits with starfield visible around it. */
+		const frameGlobe = () => {
+			const vFov = THREE.MathUtils.degToRad(camera.fov);
+			const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+			const fitFov = Math.min(vFov, hFov);
+			const distance = (1 / Math.sin(fitFov / 2)) * 1.2;
+			const dir = camera.position.clone().sub(controls.target);
+			if (dir.lengthSq() < 1e-8) dir.set(0, 0.95, 0.85);
+			dir.normalize();
+			camera.position.copy(controls.target).addScaledVector(dir, distance);
+			controls.update();
+		};
 
 		sceneResources = {
 			geometry,
@@ -370,6 +535,7 @@
 			texture,
 			controls,
 			globe,
+			onControlsStart: isStage ? onControlsStart : undefined,
 			starsGeometry: stars.geometry,
 			starsMaterial: stars.material,
 			sunTexture: sun.texture,
@@ -386,6 +552,7 @@
 			camera.aspect = w / h;
 			camera.updateProjectionMatrix();
 			webgl.setSize(w, h, false);
+			if (autoFrame) frameGlobe();
 		};
 		fit();
 		resizeObserver = new ResizeObserver(fit);
@@ -421,6 +588,11 @@
 		const el = container;
 		const key = loadKey;
 		const url = src;
+		const mountOpts = {
+			depolarSquare,
+			emptyFillColor,
+			variant
+		};
 		if (!el || !key || !url) return;
 		if (key === loadedKey && renderer) return;
 
@@ -431,7 +603,7 @@
 		void (async () => {
 			try {
 				// Load with full URL (incl. ?v= cache-bust); key only dedupes remounts.
-				await mountGlobe(el, url);
+				await mountGlobe(el, url, mountOpts);
 				if (cancelled) disposeViewer();
 			} catch (err) {
 				if (cancelled) return;
@@ -452,12 +624,14 @@
 	});
 </script>
 
-<div class="space-y-1.5">
+<div class={variant === 'stage' ? 'relative h-full w-full' : 'space-y-1.5'}>
 	<div
 		bind:this={shellEl}
-		class="relative overflow-hidden bg-black ring-1 ring-stone-800 {isFullscreen
-			? 'h-screen w-screen rounded-none'
-			: 'h-[min(50vh,28rem)] w-full rounded-lg'}"
+		class="relative overflow-hidden bg-black {variant === 'stage'
+			? 'h-full w-full rounded-none ring-0'
+			: isFullscreen
+				? 'h-screen w-screen rounded-none ring-1 ring-stone-800'
+				: 'h-[min(50vh,28rem)] w-full rounded-lg ring-1 ring-stone-800'}"
 	>
 		<div bind:this={container} class="h-full w-full" aria-label={title}></div>
 		{#if statusMessage}
@@ -465,6 +639,13 @@
 				class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/85 px-4 text-center text-sm text-stone-200"
 			>
 				{statusMessage}
+			</p>
+		{/if}
+		{#if variant === 'stage'}
+			<p
+				class="pointer-events-none absolute inset-x-0 bottom-3 z-10 text-center text-xs text-stone-200/45"
+			>
+				Drag to orbit · scroll to zoom
 			</p>
 		{/if}
 		{#if fullscreenSupported}
@@ -513,5 +694,7 @@
 			</button>
 		{/if}
 	</div>
-	<p class="text-xs text-stone-400">Drag to orbit · scroll to zoom</p>
+	{#if variant !== 'stage'}
+		<p class="text-xs text-stone-400">Drag to orbit · scroll to zoom</p>
+	{/if}
 </div>
