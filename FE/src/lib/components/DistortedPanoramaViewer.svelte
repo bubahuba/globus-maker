@@ -3,11 +3,14 @@
 	import { onDestroy, onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
 	/** Client safety net; server already serves ≤6000px equirectangular preview. */
 	const MAX_EDGE = 6000;
 	const STAR_COUNT = 4000;
 	const SUN_DIR = new THREE.Vector3(4.2, 1.4, 2.6);
+	/** Earth obliquity — north pole tipped toward the sun (NH summer). */
+	const EARTH_AXIAL_TILT_DEG = 23.44;
 
 	interface Props {
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
@@ -58,7 +61,71 @@
 		starsMaterial: THREE.Material;
 		sunTexture: THREE.Texture;
 		sunMaterial: THREE.Material;
+		lensflare: Lensflare;
+		lensflareTextures: THREE.Texture[];
+		atmosphereGeometry: THREE.BufferGeometry;
+		atmosphereMaterial: THREE.Material;
 	} | null = null;
+
+	/**
+	 * Tip local +Y (north) toward `sunDir` by Earth's axial tilt — northern summer solstice.
+	 * Spin the globe with `globe.rotation.y` so it turns around that tilted axis.
+	 */
+	function applySummerAxialTilt(
+		group: THREE.Group,
+		sunDir: THREE.Vector3,
+		tiltDeg = EARTH_AXIAL_TILT_DEG
+	) {
+		const up = new THREE.Vector3(0, 1, 0);
+		const toward = sunDir.clone().normalize();
+		const axis = new THREE.Vector3().crossVectors(up, toward);
+		if (axis.lengthSq() < 1e-10) {
+			group.quaternion.identity();
+			return;
+		}
+		axis.normalize();
+		group.quaternion.setFromAxisAngle(axis, THREE.MathUtils.degToRad(tiltDeg));
+	}
+
+	/** Soft fresnel shell — almost invisible face-on, faint limb glow at the rim. */
+	function createAtmosphere(radius = 1.045) {
+		const geometry = new THREE.SphereGeometry(radius, 64, 48);
+		const material = new THREE.ShaderMaterial({
+			uniforms: {
+				glowColor: { value: new THREE.Color(0x8eb6ff) },
+				intensity: { value: 0.22 },
+				power: { value: 3.6 }
+			},
+			vertexShader: `
+				varying vec3 vNormal;
+				varying vec3 vWorldPos;
+				void main() {
+					vec4 worldPos = modelMatrix * vec4(position, 1.0);
+					vWorldPos = worldPos.xyz;
+					vNormal = normalize(mat3(modelMatrix) * normal);
+					gl_Position = projectionMatrix * viewMatrix * worldPos;
+				}
+			`,
+			fragmentShader: `
+				uniform vec3 glowColor;
+				uniform float intensity;
+				uniform float power;
+				varying vec3 vNormal;
+				varying vec3 vWorldPos;
+				void main() {
+					vec3 viewDir = normalize(cameraPosition - vWorldPos);
+					float fresnel = pow(1.0 - abs(dot(viewDir, normalize(vNormal))), power);
+					float alpha = fresnel * intensity;
+					gl_FragColor = vec4(glowColor, alpha);
+				}
+			`,
+			transparent: true,
+			depthWrite: false,
+			side: THREE.FrontSide,
+			blending: THREE.AdditiveBlending
+		});
+		return { mesh: new THREE.Mesh(geometry, material), geometry, material };
+	}
 
 	/** Random stars on a spherical shell around the globe. */
 	function createStarfield(count = STAR_COUNT) {
@@ -125,6 +192,61 @@
 		return { sprite, texture, material };
 	}
 
+	function makeLensflareTexture(kind: 'glow' | 'disc' | 'ring') {
+		const size = kind === 'glow' ? 256 : 128;
+		const canvas = document.createElement('canvas');
+		canvas.width = size;
+		canvas.height = size;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('Canvas unavailable');
+		const c = size / 2;
+		if (kind === 'glow') {
+			const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+			g.addColorStop(0, 'rgba(255,255,255,1)');
+			g.addColorStop(0.12, 'rgba(255,255,255,0.75)');
+			g.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+			g.addColorStop(1, 'rgba(255,255,255,0)');
+			ctx.fillStyle = g;
+			ctx.fillRect(0, 0, size, size);
+		} else if (kind === 'ring') {
+			const g = ctx.createRadialGradient(c, c, c * 0.42, c, c, c * 0.78);
+			g.addColorStop(0, 'rgba(255,255,255,0)');
+			g.addColorStop(0.4, 'rgba(255,255,255,0.55)');
+			g.addColorStop(0.75, 'rgba(255,255,255,0.12)');
+			g.addColorStop(1, 'rgba(255,255,255,0)');
+			ctx.fillStyle = g;
+			ctx.fillRect(0, 0, size, size);
+		} else {
+			const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+			g.addColorStop(0, 'rgba(255,255,255,0.95)');
+			g.addColorStop(0.3, 'rgba(255,255,255,0.4)');
+			g.addColorStop(0.65, 'rgba(255,255,255,0.1)');
+			g.addColorStop(1, 'rgba(255,255,255,0)');
+			ctx.fillStyle = g;
+			ctx.fillRect(0, 0, size, size);
+		}
+		const texture = new THREE.CanvasTexture(canvas);
+		texture.colorSpace = THREE.SRGBColorSpace;
+		return texture;
+	}
+
+	/** Ghosts along the sun→screen-center axis when the sun is in view (hidden when occluded by the globe). */
+	function createSunLensflare(position: THREE.Vector3) {
+		const glow = makeLensflareTexture('glow');
+		const disc = makeLensflareTexture('disc');
+		const ring = makeLensflareTexture('ring');
+		const lensflare = new Lensflare();
+		lensflare.position.copy(position);
+		lensflare.addElement(new LensflareElement(glow, 520, 0, new THREE.Color(0xfff1dd)));
+		lensflare.addElement(new LensflareElement(disc, 90, 0.22, new THREE.Color(0xffc878)));
+		lensflare.addElement(new LensflareElement(ring, 170, 0.38, new THREE.Color(0x9ec0ff)));
+		lensflare.addElement(new LensflareElement(disc, 70, 0.52, new THREE.Color(0xff8a5c)));
+		lensflare.addElement(new LensflareElement(disc, 110, 0.72, new THREE.Color(0x8ab6ff)));
+		lensflare.addElement(new LensflareElement(ring, 210, 0.88, new THREE.Color(0xffd9a8)));
+		lensflare.addElement(new LensflareElement(disc, 48, 1, new THREE.Color(0xffffff)));
+		return { lensflare, textures: [glow, disc, ring] };
+	}
+
 	function disposeViewer() {
 		if (animationId) {
 			cancelAnimationFrame(animationId);
@@ -141,6 +263,10 @@
 			sceneResources.starsMaterial.dispose();
 			sceneResources.sunTexture.dispose();
 			sceneResources.sunMaterial.dispose();
+			sceneResources.lensflare.dispose();
+			for (const tex of sceneResources.lensflareTextures) tex.dispose();
+			sceneResources.atmosphereGeometry.dispose();
+			sceneResources.atmosphereMaterial.dispose();
 			sceneResources = null;
 		}
 		if (renderer) {
@@ -207,6 +333,8 @@
 		nextScene.add(sunLight);
 		const sun = createSun(SUN_DIR);
 		nextScene.add(sun.sprite);
+		const flare = createSunLensflare(sun.sprite.position);
+		nextScene.add(flare.lensflare);
 		nextScene.add(new THREE.AmbientLight(0x9aa8c4, 0.42));
 		const nightFill = new THREE.DirectionalLight(0x6d7fa8, 0.22);
 		nightFill.position.set(-3.5, -0.4, -2.2);
@@ -220,7 +348,13 @@
 			metalness: 0
 		});
 		const globe = new THREE.Mesh(geometry, material);
-		nextScene.add(globe);
+		const atmosphere = createAtmosphere();
+		// Tilted spin axis: north leans toward the sun (summer); daily rotation on local Y.
+		const earth = new THREE.Group();
+		applySummerAxialTilt(earth, SUN_DIR);
+		earth.add(globe);
+		earth.add(atmosphere.mesh);
+		nextScene.add(earth);
 
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
@@ -239,7 +373,11 @@
 			starsGeometry: stars.geometry,
 			starsMaterial: stars.material,
 			sunTexture: sun.texture,
-			sunMaterial: sun.material
+			sunMaterial: sun.material,
+			lensflare: flare.lensflare,
+			lensflareTextures: flare.textures,
+			atmosphereGeometry: atmosphere.geometry,
+			atmosphereMaterial: atmosphere.material
 		};
 
 		const fit = () => {
