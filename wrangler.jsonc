@@ -46,6 +46,7 @@
     "PROCESSOR_URL": "https://globus-processor.rascasone.dev",
     "PUBLIC_SITE_ORIGIN": "https://globe.rgb.sk",
     "API_CALLBACK_ORIGIN": "https://globe.rgb.sk",
+    "MONITOR_ORIGIN": "https://rgb.sk",
     "PAYPAL_MODE": "live",
     "PAYPAL_CURRENCY": "EUR"
   }

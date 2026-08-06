@@ -30,6 +30,7 @@ Build command: `npm run build` (default is fine).
 | `ASSETS` | Static SPA from `FE/build` (`not_found_handling: spa` + `run_worker_first: true`) |
 | `ARTIFACTS` | R2 bucket for job state + zip files |
 | `PROCESSOR_URL` | External processor base URL |
+| `MONITOR_ORIGIN` | Monitor host for PHP globe-preview archive (`https://rgb.sk`) |
 
 `run_worker_first: true` is required so browser navigations to `/api/.../files/*.jpg` hit Hono (not SPA `index.html`). Compatibility date ≥ 2025-04-01 otherwise skips the Worker for `Sec-Fetch-Mode: navigate`.
 

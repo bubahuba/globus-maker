@@ -78,7 +78,7 @@ app.use(
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
-    exposeHeaders: ["Content-Type", "Content-Length"],
+    exposeHeaders: ["Content-Type", "Content-Length", "X-Archive-Name"],
   }),
 );
 
@@ -481,6 +481,91 @@ app.post("/api/jobs", async (c) => {
 
 /** Monitor-site-relative fallback when no recent globe preview exists. */
 const MONITOR_FALLBACK_SPHERE = "rip.jpeg";
+
+/** Filenames accepted by monitor `globe-preview/save.php`. */
+const ARCHIVE_FILENAME_RE = /^[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/i;
+
+function monitorOrigin(env: Env): string {
+  return (env.MONITOR_ORIGIN ?? "https://rgb.sk").replace(/\/$/, "");
+}
+
+function sanitizeArchiveFilename(raw: string): string | null {
+  const name = raw.replace(/\\/g, "/").split("/").pop() ?? "";
+  return ARCHIVE_FILENAME_RE.test(name) ? name : null;
+}
+
+/**
+ * Proxy to monitor PHP archive APIs on MONITOR_ORIGIN (rgb.sk):
+ *   GET  /api/globe-preview/list
+ *   POST /api/globe-preview/save?name=
+ *   GET  /api/globe-preview/:name
+ */
+app.get("/api/globe-preview/list", async (c) => {
+  const upstream = await fetch(`${monitorOrigin(c.env)}/globe-preview/list.php`, {
+    headers: { Accept: "application/json, text/plain, */*" },
+  });
+  const body = await upstream.arrayBuffer();
+  return new Response(body, {
+    status: upstream.status,
+    headers: {
+      "Content-Type": upstream.headers.get("Content-Type") || "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
+app.post("/api/globe-preview/save", async (c) => {
+  const name = sanitizeArchiveFilename(c.req.query("name") ?? "");
+  if (!name) return c.text("Invalid filename", 400);
+
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength === 0) return c.text("Empty body", 400);
+  if (body.byteLength > 32 * 1024 * 1024) return c.text("Too large", 413);
+
+  const upstream = await fetch(
+    `${monitorOrigin(c.env)}/globe-preview/save.php?name=${encodeURIComponent(name)}`,
+    {
+      method: "POST",
+      body,
+      headers: {
+        "Content-Type": c.req.header("Content-Type") || "image/jpeg",
+      },
+    },
+  );
+  const text = await upstream.text();
+  const headers = new Headers({
+    "Content-Type": upstream.headers.get("Content-Type") || "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  const archiveName = upstream.headers.get("X-Archive-Name");
+  if (archiveName) headers.set("X-Archive-Name", archiveName);
+  return new Response(text, { status: upstream.status, headers });
+});
+
+app.on(["GET", "HEAD"], "/api/globe-preview/:name", async (c) => {
+  const name = sanitizeArchiveFilename(c.req.param("name"));
+  if (!name) return c.text("Not found", 404);
+
+  const upstream = await fetch(
+    `${monitorOrigin(c.env)}/globe-preview/${encodeURIComponent(name)}`,
+    { method: c.req.method },
+  );
+  if (!upstream.ok) {
+    return new Response(upstream.status === 404 ? "Not found" : "Upstream error", {
+      status: upstream.status,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+  const headers = {
+    "Content-Type": upstream.headers.get("Content-Type") || "image/jpeg",
+    "Cache-Control": "public, max-age=3600",
+  };
+  if (c.req.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
+  const body = await upstream.arrayBuffer();
+  return new Response(body, { status: 200, headers });
+});
 
 function latestGlobeFallback() {
   return {

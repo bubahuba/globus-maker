@@ -19,6 +19,9 @@ alwaysApply: false
 | `POST /api/estimate` | Preview zoom, tiles, stripe dimensions |
 | `POST /api/jobs` | Start job (`waitUntil` for async processing) |
 | `GET /api/jobs/latest-globe` | Latest globe job with sphere preview + emptyFill/map preview URLs; else `fallback` + monitor-relative `rip.jpeg` |
+| `GET /api/globe-preview/list` | Proxy → `MONITOR_ORIGIN/globe-preview/list.php` (archive filenames) |
+| `POST /api/globe-preview/save?name=` | Proxy → monitor `save.php` (texture / `-thumb.jpg`) |
+| `GET /api/globe-preview/:name` | Proxy → archived JPEG on monitor host |
 | `GET /api/jobs/:id` | Poll status |
 | `PATCH /api/jobs/:id/progress` | Processor callback |
 | `DELETE /api/jobs/:id` | Cancel queued/running job |

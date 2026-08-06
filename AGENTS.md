@@ -18,7 +18,7 @@ npm run deploy
 - **worker.ts** — Cloudflare Worker entry
 - **container/** — Python processor (MVT → SVG map → globe prewarp → slize.pl JPEG stripes → zip)
 - **shared/** — `map-style.ts` (layers, MapLibre style, render palette)
-- **monitor/** — static full-window Three.js globe (calls `https://globe.rgb.sk/api/jobs/latest-globe`)
+- **monitor/** — static full-window Three.js globe on `rgb.sk` (API `globe.rgb.sk`; PHP `/globe-preview` archive). FE `/latest-planet` uses the same archive via Worker proxy (`MONITOR_ORIGIN`)
 
 ## Cursor context
 

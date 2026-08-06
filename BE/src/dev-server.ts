@@ -11,6 +11,7 @@ const env: Env = {
   PROCESSOR_URL: process.env.PROCESSOR_URL ?? "http://localhost:8080",
   API_CALLBACK_ORIGIN:
     process.env.API_CALLBACK_ORIGIN ?? "http://host.docker.internal:8787",
+  MONITOR_ORIGIN: process.env.MONITOR_ORIGIN ?? "https://rgb.sk",
   PAYPAL_MODE: process.env.PAYPAL_MODE,
   PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID,
   PAYPAL_CLIENT_SECRET: process.env.PAYPAL_CLIENT_SECRET,

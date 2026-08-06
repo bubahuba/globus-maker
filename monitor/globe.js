@@ -180,7 +180,7 @@ function makeLensflareTexture(kind) {
 
 /**
  * Tip local +Y (north) toward `sunDir` by Earth's axial tilt — northern summer solstice.
- * Spin the globe with `globe.rotation.y` so it turns around that tilted axis.
+ * Spin the globe with `globe.rotation.y -= …` (prograde / west→east) around that tilted axis.
  */
 function applySummerAxialTilt(group, sunDir, tiltDeg = EARTH_AXIAL_TILT_DEG) {
 	const up = new THREE.Vector3(0, 1, 0);
@@ -643,7 +643,8 @@ async function mountGlobe(el, url, opts = {}) {
 
 	const tick = () => {
 		animationId = requestAnimationFrame(tick);
-		globe.rotation.y += 0.0015;
+		// West→east (prograde): negative Y with SphereGeometry UV / equirect mapping.
+		globe.rotation.y -= 0.0015;
 		controls.update();
 		webgl.render(scene, camera);
 	};

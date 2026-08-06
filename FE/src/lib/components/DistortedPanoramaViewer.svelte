@@ -21,6 +21,10 @@
 		/** When true, treat square polar map like monitor fallback (DePolar). */
 		depolarSquare?: boolean;
 		emptyFillColor?: string;
+		/** Extra right inset for the fullscreen control (e.g. archive pane open). */
+		controlsOffsetRight?: string;
+		/** Hide the built-in fullscreen button (parent chrome owns it). */
+		hideFullscreenButton?: boolean;
 	}
 
 	let {
@@ -28,7 +32,9 @@
 		title = 'Sphere preview',
 		variant = 'card',
 		depolarSquare = false,
-		emptyFillColor = '#808080'
+		emptyFillColor = '#808080',
+		controlsOffsetRight = '0.75rem',
+		hideFullscreenButton = false
 	}: Props = $props();
 
 	let shellEl: HTMLDivElement | undefined = $state();
@@ -65,6 +71,8 @@
 	let animationId = 0;
 	let resizeObserver: ResizeObserver | null = null;
 	let sceneResources: {
+		scene: THREE.Scene;
+		camera: THREE.PerspectiveCamera;
 		geometry: THREE.BufferGeometry;
 		material: THREE.Material;
 		texture: THREE.Texture;
@@ -187,7 +195,7 @@
 
 	/**
 	 * Tip local +Y (north) toward `sunDir` by Earth's axial tilt — northern summer solstice.
-	 * Spin the globe with `globe.rotation.y` so it turns around that tilted axis.
+	 * Spin the globe with `globe.rotation.y -= …` (prograde / west→east) around that tilted axis.
 	 */
 	function applySummerAxialTilt(
 		group: THREE.Group,
@@ -459,7 +467,12 @@
 			camera.position.set(0, 0.35, 2.6);
 		}
 
-		const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+		// preserveDrawingBuffer so stage archive thumbs can canvas.toBlob after render.
+		const webgl = new THREE.WebGLRenderer({
+			antialias: true,
+			alpha: false,
+			preserveDrawingBuffer: isStage
+		});
 		webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 		webgl.outputColorSpace = THREE.SRGBColorSpace;
 		webgl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -530,6 +543,8 @@
 		};
 
 		sceneResources = {
+			scene: nextScene,
+			camera,
 			geometry,
 			material,
 			texture,
@@ -560,7 +575,8 @@
 
 		const tick = () => {
 			animationId = requestAnimationFrame(tick);
-			globe.rotation.y += 0.0015;
+			// West→east (prograde): negative Y with SphereGeometry UV / equirect mapping.
+			globe.rotation.y -= 0.0015;
 			controls.update();
 			webgl.render(nextScene, camera);
 		};
@@ -622,6 +638,21 @@
 		disposeViewer();
 		loadedKey = '';
 	});
+
+	/** Snapshot the WebGL canvas for archive gallery thumbs (stage / preserveDrawingBuffer). */
+	export async function captureThumbBlob(
+		type = 'image/jpeg',
+		quality = 0.82
+	): Promise<Blob | null> {
+		const webgl = renderer;
+		const resources = sceneResources;
+		if (!webgl || !resources) return null;
+		await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+		webgl.render(resources.scene, resources.camera);
+		return new Promise((resolve) => {
+			webgl.domElement.toBlob((blob) => resolve(blob), type, quality);
+		});
+	}
 </script>
 
 <div class={variant === 'stage' ? 'relative h-full w-full' : 'space-y-1.5'}>
@@ -648,13 +679,14 @@
 				Drag to orbit · scroll to zoom
 			</p>
 		{/if}
-		{#if fullscreenSupported}
+		{#if fullscreenSupported && !hideFullscreenButton}
 			<button
 				type="button"
 				onclick={toggleFullscreen}
 				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
 				title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-				class="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
+				class="absolute top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
+				style:right={controlsOffsetRight}
 			>
 				{#if isFullscreen}
 					<svg

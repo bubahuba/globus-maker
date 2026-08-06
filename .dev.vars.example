@@ -3,6 +3,9 @@ PROCESSOR_URL=http://localhost:8080
 # Local Docker processor → host.docker.internal; remote processor → public API URL.
 API_CALLBACK_ORIGIN=http://host.docker.internal:8787
 
+# Monitor host with PHP /globe-preview list+save (FE /latest-planet archive proxy).
+MONITOR_ORIGIN=https://rgb.sk
+
 # PayPal Checkout (sandbox) — copy values from `.env`
 PAYPAL_MODE=sandbox
 USER_PAYPAL=

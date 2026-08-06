@@ -16,7 +16,7 @@ Web app to download an OSM region as a square map, or generate globe meridian st
 | `worker.ts` | Cloudflare Worker entry — routes `/api/*` to Hono, else static assets |
 | `container/` | Python/FastAPI processor (tile fetch, stitch, `slize.pl`, zip) |
 | `shared/` | Cross-stack code (`map-style.ts`) imported via `@shared` alias |
-| `monitor/` | Static full-window Three.js globe (any host; API origin `globe.rgb.sk`) |
+| `monitor/` | Static full-window Three.js globe on `rgb.sk` (API `globe.rgb.sk`; PHP `/globe-preview` archive). FE `/latest-planet` proxies archive via `MONITOR_ORIGIN`. |
 
 ## Local dev
 
