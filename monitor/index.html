@@ -94,6 +94,11 @@
 				flex-direction: row;
 				align-items: flex-end;
 				gap: 0.65rem;
+				transition: right 0.25s ease;
+			}
+
+			body.archive-open #app-links {
+				right: calc(min(20rem, 85vw) + 0.85rem);
 			}
 
 			.app-link {
@@ -149,35 +154,19 @@
 				position: fixed;
 				top: max(0.75rem, env(safe-area-inset-top));
 				right: max(0.75rem, env(safe-area-inset-right));
-				z-index: 4;
+				z-index: 6;
 				display: flex;
 				flex-direction: row;
 				align-items: center;
 				gap: 0.5rem;
+				transition: right 0.25s ease;
 			}
 
-			#preview-select {
-				max-width: min(16rem, calc(100vw - 5.5rem));
-				height: 2.25rem;
-				padding: 0 0.65rem;
-				border: 1px solid rgba(231, 229, 228, 0.28);
-				border-radius: 0.55rem;
-				background: rgba(28, 25, 23, 0.82);
-				color: #e7e5e4;
-				font: inherit;
-				font-size: 0.78rem;
-				backdrop-filter: blur(8px);
-				-webkit-backdrop-filter: blur(8px);
-				box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-				cursor: pointer;
+			body.archive-open #controls {
+				right: calc(min(20rem, 85vw) + 0.75rem);
 			}
 
-			#preview-select:focus-visible {
-				outline: 2px solid #e7e5e4;
-				outline-offset: 2px;
-			}
-
-			#fullscreen-btn {
+			.ctrl-btn {
 				display: flex;
 				align-items: center;
 				justify-content: center;
@@ -194,28 +183,148 @@
 				cursor: pointer;
 			}
 
-			#fullscreen-btn:hover {
+			.ctrl-btn:hover {
 				background: rgba(41, 37, 36, 0.92);
 			}
 
-			#fullscreen-btn:focus-visible {
+			.ctrl-btn:focus-visible {
 				outline: 2px solid #e7e5e4;
 				outline-offset: 2px;
 			}
 
-			#fullscreen-btn[hidden] {
+			.ctrl-btn[hidden] {
 				display: none;
+			}
+
+			.ctrl-btn svg {
+				width: 1rem;
+				height: 1rem;
 			}
 
 			#fullscreen-btn svg {
 				display: none;
-				width: 1rem;
-				height: 1rem;
 			}
 
 			#fullscreen-btn[aria-pressed='false'] #fullscreen-enter-icon,
 			#fullscreen-btn[aria-pressed='true'] #fullscreen-exit-icon {
 				display: block;
+			}
+
+			#archive-btn[aria-pressed='true'] {
+				background: rgba(68, 64, 60, 0.95);
+			}
+
+			#archive-pane {
+				position: fixed;
+				top: 0;
+				right: 0;
+				bottom: 0;
+				z-index: 5;
+				width: min(20rem, 85vw);
+				display: flex;
+				flex-direction: column;
+				background: rgba(12, 10, 9, 0.94);
+				border-left: 1px solid rgba(231, 229, 228, 0.12);
+				box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+				transform: translateX(100%);
+				transition: transform 0.25s ease;
+				backdrop-filter: blur(12px);
+				-webkit-backdrop-filter: blur(12px);
+				pointer-events: none;
+			}
+
+			body.archive-open #archive-pane {
+				transform: translateX(0);
+				pointer-events: auto;
+			}
+
+			#archive-pane-header {
+				flex: 0 0 auto;
+				padding: 0.85rem 1rem;
+				font-size: 0.78rem;
+				font-weight: 600;
+				letter-spacing: 0.02em;
+				color: rgba(231, 229, 228, 0.7);
+				border-bottom: 1px solid rgba(231, 229, 228, 0.1);
+			}
+
+			#archive-list {
+				flex: 1 1 auto;
+				overflow-y: auto;
+				overscroll-behavior: contain;
+				padding: 0.65rem;
+				display: flex;
+				flex-direction: column;
+				gap: 0.5rem;
+			}
+
+			.archive-item {
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				gap: 0.65rem;
+				width: 100%;
+				padding: 0.45rem;
+				border: 1px solid rgba(231, 229, 228, 0.12);
+				border-radius: 0.65rem;
+				background: rgba(28, 25, 23, 0.55);
+				color: #e7e5e4;
+				font: inherit;
+				text-align: left;
+				cursor: pointer;
+			}
+
+			.archive-item:hover {
+				background: rgba(41, 37, 36, 0.85);
+			}
+
+			.archive-item[aria-current='true'] {
+				border-color: rgba(231, 229, 228, 0.45);
+				background: rgba(68, 64, 60, 0.75);
+			}
+
+			.archive-item:focus-visible {
+				outline: 2px solid #e7e5e4;
+				outline-offset: 2px;
+			}
+
+			.archive-thumb {
+				flex: 0 0 auto;
+				width: 4.5rem;
+				height: 4.5rem;
+				border-radius: 0.45rem;
+				object-fit: cover;
+				background: #1c1917;
+			}
+
+			.archive-thumb-placeholder {
+				flex: 0 0 auto;
+				width: 4.5rem;
+				height: 4.5rem;
+				border-radius: 0.45rem;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				background: #1c1917;
+				color: rgba(231, 229, 228, 0.35);
+				font-size: 0.65rem;
+			}
+
+			.archive-name {
+				flex: 1 1 auto;
+				min-width: 0;
+				font-size: 0.82rem;
+				font-weight: 500;
+				line-height: 1.25;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+
+			.archive-empty {
+				padding: 1rem 0.5rem;
+				font-size: 0.78rem;
+				color: rgba(231, 229, 228, 0.4);
+				text-align: center;
 			}
 		</style>
 		<script type="importmap">
@@ -232,13 +341,35 @@
 		<p id="status">Loading latest globe…</p>
 		<p id="hint">Drag to orbit · scroll to zoom</p>
 		<div id="controls">
-			<label class="sr-only" for="preview-select">Saved globe preview</label>
-			<select id="preview-select" aria-label="Globe preview">
-				<option value="">Latest</option>
-			</select>
+			<button
+				type="button"
+				id="archive-btn"
+				class="ctrl-btn"
+				aria-label="Open saved globes"
+				aria-pressed="false"
+				aria-controls="archive-pane"
+				title="Saved globes"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<rect width="7" height="7" x="3" y="3" rx="1" />
+					<rect width="7" height="7" x="14" y="3" rx="1" />
+					<rect width="7" height="7" x="14" y="14" rx="1" />
+					<rect width="7" height="7" x="3" y="14" rx="1" />
+				</svg>
+			</button>
 			<button
 				type="button"
 				id="fullscreen-btn"
+				class="ctrl-btn"
 				aria-label="Enter fullscreen"
 				aria-pressed="false"
 				title="Enter fullscreen"
@@ -278,6 +409,10 @@
 				</svg>
 			</button>
 		</div>
+		<aside id="archive-pane" aria-label="Saved globes" aria-hidden="true">
+			<div id="archive-pane-header">Saved globes</div>
+			<div id="archive-list"></div>
+		</aside>
 		<nav id="app-links" aria-label="Apps">
 			<a
 				class="app-link"
@@ -304,6 +439,6 @@
 				<span class="app-label">Globe Maker</span>
 			</a>
 		</nav>
-		<script type="module" src="./globe.js?v=7"></script>
+		<script type="module" src="./globe.js?v=10"></script>
 	</body>
 </html>

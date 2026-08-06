@@ -12,7 +12,7 @@ const GLOBE_ORIGIN = 'https://globe.rgb.sk';
 /**
  * Saved previews live on the monitor host (not the API):
  *   GET  /globe-preview/list.php           → JSON filename list
- *   POST /globe-preview/save.php?name=…    → store JPEG body
+ *   POST /globe-preview/save.php?name=…    → store JPEG / -thumb.jpg screenshot
  *   GET  /globe-preview/<file>             → static image
  * Prod: tiny PHP on Apache/FPM. Local: Vite middleware.
  */
@@ -20,6 +20,7 @@ const PREVIEW_DIR_URL = new URL('/globe-preview/', location.origin).href;
 const PREVIEW_LIST_URL = new URL('list.php', PREVIEW_DIR_URL).href;
 const PREVIEW_SAVE_URL = new URL('save.php', PREVIEW_DIR_URL).href;
 const IMAGE_NAME_RE = /\.(jpe?g|png|webp)$/i;
+const THUMB_NAME_RE = /-thumb\.(jpe?g|png|webp)$/i;
 
 /** Optional override: ?origin=http://localhost:8787 for local API. */
 const originParam = new URLSearchParams(location.search).get('origin');
@@ -32,8 +33,10 @@ const EARTH_AXIAL_TILT_DEG = 23.44;
 
 const container = document.getElementById('globe');
 const statusEl = document.getElementById('status');
-const selectEl = document.getElementById('preview-select');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
+const archiveBtn = document.getElementById('archive-btn');
+const archivePane = document.getElementById('archive-pane');
+const archiveList = document.getElementById('archive-list');
 
 let renderer = null;
 let animationId = 0;
@@ -47,6 +50,11 @@ let archivedNames = [];
 /** Place label for the live (API) option — updated on each successful live fetch. */
 let liveDisplayName = '';
 let pollTimer = 0;
+let archivePaneOpen = false;
+/** Last live job opts so gallery can return to live without a full remount when possible. */
+let lastLiveJob = null;
+/** Ignore stale async texture loads when polls/clicks overlap. */
+let textureLoadSeq = 0;
 
 function setStatus(message) {
 	if (!statusEl) return;
@@ -412,6 +420,108 @@ async function loadTexture(url, { depolarSquare = false, emptyFillColor = '#8080
 	return texture;
 }
 
+function waitFrames(count = 2) {
+	return new Promise((resolve) => {
+		let left = Math.max(1, count);
+		const step = () => {
+			left -= 1;
+			if (left <= 0) resolve();
+			else requestAnimationFrame(step);
+		};
+		requestAnimationFrame(step);
+	});
+}
+
+function viewerReady() {
+	return !!(renderer && sceneResources?.material && sceneResources?.globe && sceneResources?.controls);
+}
+
+/** Snapshot view so a texture swap never drifts camera / spin. */
+function captureViewState() {
+	if (!viewerReady()) return null;
+	const { camera, controls, globe } = sceneResources;
+	return {
+		cameraPos: camera.position.clone(),
+		target: controls.target.clone(),
+		spinY: globe.rotation.y
+	};
+}
+
+function restoreViewState(state) {
+	if (!state || !viewerReady()) return;
+	const { camera, controls, globe } = sceneResources;
+	camera.position.copy(state.cameraPos);
+	controls.target.copy(state.target);
+	globe.rotation.y = state.spinY;
+	controls.update();
+}
+
+/**
+ * Swap globe albedo only — keeps camera, orbit target, and spin.
+ * Mounts the full scene only on first load (no viewer yet).
+ */
+async function applyGlobeTexture(url, opts = {}) {
+	if (!container) throw new Error('Missing #globe container');
+	if (!viewerReady()) {
+		await mountGlobe(container, url, opts);
+		loadedPreviewUrl = url;
+		return;
+	}
+	if (url === loadedPreviewUrl) return;
+
+	const seq = ++textureLoadSeq;
+	const view = captureViewState();
+	const texture = await loadTexture(url, opts);
+	if (seq !== textureLoadSeq || !viewerReady()) {
+		texture.dispose();
+		return;
+	}
+
+	const prev = sceneResources.texture;
+	sceneResources.material.map = texture;
+	sceneResources.material.needsUpdate = true;
+	sceneResources.texture = texture;
+	prev?.dispose();
+	restoreViewState(view);
+	loadedPreviewUrl = url;
+}
+
+/** Show a globe URL: silent hot-swap when already viewing; overlay only for first mount. */
+async function showGlobe(url, opts = {}) {
+	const hot = viewerReady();
+	if (hot && url === loadedPreviewUrl) {
+		setStatus('');
+		return;
+	}
+	if (!hot) setStatus('Loading preview…');
+	try {
+		await applyGlobeTexture(url, opts);
+		setStatus('');
+	} catch (err) {
+		if (!hot) throw err;
+		// Keep the current globe on screen if a background poll fails mid-swap.
+		console.warn('Texture hot-reload failed', err);
+		setStatus('');
+	}
+}
+
+async function captureGlobeThumbBlob() {
+	if (!sceneResources?.scene || !sceneResources?.camera || !renderer) {
+		throw new Error('Viewer not ready for screenshot');
+	}
+	await waitFrames(3);
+	renderer.render(sceneResources.scene, sceneResources.camera);
+	const canvas = renderer.domElement;
+	const blob = await new Promise((resolve, reject) => {
+		canvas.toBlob(
+			(b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))),
+			'image/jpeg',
+			0.82
+		);
+	});
+	return blob;
+}
+
 async function mountGlobe(el, url, opts = {}) {
 	disposeViewer();
 	el.replaceChildren();
@@ -425,7 +535,12 @@ async function mountGlobe(el, url, opts = {}) {
 	// Bias toward north pole (+Y); distance set by frameGlobe().
 	camera.position.set(0, 0.95, 0.85);
 
-	const webgl = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+	// preserveDrawingBuffer so canvas.toBlob can capture after render.
+	const webgl = new THREE.WebGLRenderer({
+		antialias: true,
+		alpha: false,
+		preserveDrawingBuffer: true
+	});
 	webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 	webgl.outputColorSpace = THREE.SRGBColorSpace;
 	webgl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -494,6 +609,8 @@ async function mountGlobe(el, url, opts = {}) {
 	};
 
 	sceneResources = {
+		scene,
+		camera,
 		geometry,
 		material,
 		texture,
@@ -531,6 +648,7 @@ async function mountGlobe(el, url, opts = {}) {
 		webgl.render(scene, camera);
 	};
 	tick();
+	loadedPreviewUrl = url;
 }
 
 async function fetchLatestGlobe() {
@@ -567,6 +685,18 @@ function parseDirectoryListing(text) {
 		}
 	}
 	return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function isThumbFilename(name) {
+	return THUMB_NAME_RE.test(name);
+}
+
+function thumbNameFor(filename) {
+	return String(filename).replace(IMAGE_NAME_RE, '-thumb.jpg');
+}
+
+function textureArchiveNames() {
+	return archivedNames.filter((name) => !isThumbFilename(name));
 }
 
 async function listArchivedPreviews() {
@@ -626,15 +756,13 @@ function archiveNameForJob(job) {
 	return sanitizeArchiveName(`${place}-${id}.jpg`);
 }
 
-/** Dropdown label: drop extension and trailing job-id / timestamp suffix. */
+/** Gallery label: drop extension and trailing job-id / timestamp suffix. */
 function archiveDisplayLabel(filename) {
-	const stem = String(filename || '').replace(IMAGE_NAME_RE, '');
+	const stem = String(filename || '')
+		.replace(THUMB_NAME_RE, '')
+		.replace(IMAGE_NAME_RE, '');
 	const withoutId = stem.replace(/-(?:[0-9a-f]{8}-[0-9a-f]{3}|\d{10,})$/i, '');
 	return withoutId || stem || filename;
-}
-
-function liveOptionLabel() {
-	return liveDisplayName || 'Latest';
 }
 
 function placeLabelFromJob(job) {
@@ -643,49 +771,14 @@ function placeLabelFromJob(job) {
 	return place || 'Globe';
 }
 
-function rebuildSelectOptions(selected = selectedArchive) {
-	if (!selectEl) return;
-	const keep = selected;
-	selectEl.replaceChildren();
-	const live = document.createElement('option');
-	live.value = '';
-	live.textContent = liveOptionLabel();
-	selectEl.appendChild(live);
-	for (const name of archivedNames) {
-		const opt = document.createElement('option');
-		opt.value = name;
-		opt.textContent = archiveDisplayLabel(name);
-		selectEl.appendChild(opt);
-	}
-	selectEl.value = keep && archivedNames.includes(keep) ? keep : '';
-	selectedArchive = selectEl.value;
-}
-
-async function refreshArchiveList({ keepSelection = true } = {}) {
-	await listArchivedPreviews();
-	rebuildSelectOptions(keepSelection ? selectedArchive : '');
-}
-
-async function savePreviewIfNew(filename, sourceUrl) {
-	if (!filename || !sourceUrl) return;
-	if (archivedNames.includes(filename)) return;
-
+async function headExists(filename) {
 	const head = await fetch(archiveUrl(filename), { method: 'HEAD', cache: 'no-store' }).catch(
 		() => null
 	);
-	if (head?.ok) {
-		if (!archivedNames.includes(filename)) {
-			archivedNames = [...archivedNames, filename].sort((a, b) =>
-				a.localeCompare(b, undefined, { sensitivity: 'base' })
-			);
-			rebuildSelectOptions();
-		}
-		return;
-	}
+	return !!head?.ok;
+}
 
-	const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
-	if (!imageRes.ok) return;
-	const blob = await imageRes.blob();
+async function postArchiveBlob(filename, blob) {
 	const saveUrl = `${PREVIEW_SAVE_URL}?name=${encodeURIComponent(filename)}`;
 	const saveRes = await fetch(saveUrl, {
 		method: 'POST',
@@ -696,28 +789,140 @@ async function savePreviewIfNew(filename, sourceUrl) {
 	});
 	if (!saveRes.ok && saveRes.status !== 201 && saveRes.status !== 204) {
 		console.warn(
-			`Could not archive preview (${saveRes.status}). Check PHP write access on ${previewDirLabel()}`
+			`Could not archive ${filename} (${saveRes.status}). Check PHP write access on ${previewDirLabel()}`
 		);
-		return;
+		return false;
 	}
-	archivedNames = [...new Set([...archivedNames, filename])].sort((a, b) =>
+	return true;
+}
+
+function rememberArchived(...names) {
+	archivedNames = [...new Set([...archivedNames, ...names.filter(Boolean)])].sort((a, b) =>
 		a.localeCompare(b, undefined, { sensitivity: 'base' })
 	);
-	rebuildSelectOptions();
+	rebuildArchiveGallery();
+}
+
+/**
+ * After the live globe is on screen: store equirect map + canvas screenshot (-thumb).
+ */
+async function archiveLivePreview(filename, sourceUrl) {
+	if (!filename || !sourceUrl) return;
+	const thumbName = thumbNameFor(filename);
+	const hasTexture = archivedNames.includes(filename) || (await headExists(filename));
+	const hasThumb = archivedNames.includes(thumbName) || (await headExists(thumbName));
+	if (hasTexture && hasThumb) {
+		rememberArchived(filename, thumbName);
+		return;
+	}
+
+	if (!hasTexture) {
+		const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
+		if (!imageRes.ok) return;
+		const blob = await imageRes.blob();
+		const ok = await postArchiveBlob(filename, blob);
+		if (!ok) return;
+	}
+
+	if (!hasThumb) {
+		try {
+			const thumbBlob = await captureGlobeThumbBlob();
+			await postArchiveBlob(thumbName, thumbBlob);
+		} catch (err) {
+			console.warn('Could not capture globe thumb', err);
+		}
+	}
+
+	rememberArchived(filename, thumbName);
+}
+
+function rebuildArchiveGallery() {
+	if (!archiveList) return;
+	archiveList.replaceChildren();
+
+	const liveBtn = document.createElement('button');
+	liveBtn.type = 'button';
+	liveBtn.className = 'archive-item';
+	liveBtn.dataset.archive = '';
+	liveBtn.setAttribute('aria-current', selectedArchive ? 'false' : 'true');
+	const liveThumb = document.createElement('span');
+	liveThumb.className = 'archive-thumb-placeholder';
+	liveThumb.textContent = 'LIVE';
+	const liveName = document.createElement('span');
+	liveName.className = 'archive-name';
+	liveName.textContent = liveDisplayName || 'Latest';
+	liveBtn.append(liveThumb, liveName);
+	liveBtn.addEventListener('click', () => void selectArchive(''));
+	archiveList.appendChild(liveBtn);
+
+	const textures = textureArchiveNames();
+	if (textures.length === 0) {
+		const empty = document.createElement('p');
+		empty.className = 'archive-empty';
+		empty.textContent = 'No saved globes yet';
+		archiveList.appendChild(empty);
+		return;
+	}
+
+	for (const name of textures) {
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'archive-item';
+		btn.dataset.archive = name;
+		btn.setAttribute('aria-current', selectedArchive === name ? 'true' : 'false');
+
+		const thumbName = thumbNameFor(name);
+		if (archivedNames.includes(thumbName)) {
+			const img = document.createElement('img');
+			img.className = 'archive-thumb';
+			img.src = `${archiveUrl(thumbName)}?v=1`;
+			img.alt = '';
+			img.loading = 'lazy';
+			btn.appendChild(img);
+		} else {
+			const ph = document.createElement('span');
+			ph.className = 'archive-thumb-placeholder';
+			ph.textContent = 'MAP';
+			btn.appendChild(ph);
+		}
+
+		const label = document.createElement('span');
+		label.className = 'archive-name';
+		label.textContent = archiveDisplayLabel(name);
+		btn.appendChild(label);
+		btn.addEventListener('click', () => void selectArchive(name));
+		archiveList.appendChild(btn);
+	}
+}
+
+async function refreshArchiveList() {
+	await listArchivedPreviews();
+	rebuildArchiveGallery();
 }
 
 async function loadArchivedPreview(filename) {
-	if (!container) throw new Error('Missing #globe container');
 	const url = archiveUrl(filename);
-	if (url === loadedPreviewUrl && renderer) {
-		setStatus('');
+	await showGlobe(url, { depolarSquare: false });
+	document.title = `${archiveDisplayLabel(filename)} — Globe Monitor`;
+}
+
+async function selectArchive(filename) {
+	selectedArchive = filename || '';
+	rebuildArchiveGallery();
+
+	if (selectedArchive) {
+		stopPolling();
+		try {
+			await loadArchivedPreview(selectedArchive);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Could not load saved preview.';
+			setStatus(message);
+		}
 		return;
 	}
-	setStatus('Loading saved preview…');
-	await mountGlobe(container, url, { depolarSquare: false });
-	loadedPreviewUrl = url;
-	document.title = `${filename} — Globe Monitor`;
-	setStatus('');
+
+	startPolling();
+	await refreshLive();
 }
 
 async function refreshLive() {
@@ -725,29 +930,23 @@ async function refreshLive() {
 
 	try {
 		const job = await fetchLatestGlobe();
+		lastLiveJob = job;
 		liveDisplayName = placeLabelFromJob(job);
-		rebuildSelectOptions();
+		rebuildArchiveGallery();
 
 		const previewUrl = resolvePreviewUrl(job.spherePreviewUrl, {
 			fallback: job.fallback === true
 		});
 		if (!previewUrl) throw new Error('No sphere preview URL');
 
-		if (previewUrl === loadedPreviewUrl && renderer) {
-			setStatus('');
-			return;
-		}
-
-		if (!container) throw new Error('Missing #globe container');
-		setStatus('Loading preview…');
-		// Fallback / square maps: DePolar centre→north like the FE globe pipeline
-		// (corner radius + empty fill → four untextured south-pole sectors).
-		await mountGlobe(container, previewUrl, {
+		const opts = {
 			depolarSquare: job.fallback === true,
 			emptyFillColor: job.emptyFillColor || '#808080'
-		});
-		loadedPreviewUrl = previewUrl;
-		setStatus('');
+		};
+
+		if (!container) throw new Error('Missing #globe container');
+		// Poll / latest check: hot-swap texture in place (no camera reset, no black overlay).
+		await showGlobe(previewUrl, opts);
 
 		document.title =
 			liveDisplayName && liveDisplayName !== 'Unavailable'
@@ -755,7 +954,7 @@ async function refreshLive() {
 				: 'Globus Maker — Globe Monitor';
 
 		if (job.fallback !== true && job.id) {
-			void savePreviewIfNew(archiveNameForJob(job), previewUrl);
+			void archiveLivePreview(archiveNameForJob(job), previewUrl);
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Could not load globe preview.';
@@ -797,6 +996,19 @@ async function toggleFullscreen() {
 	}
 }
 
+function setArchivePaneOpen(open) {
+	archivePaneOpen = open;
+	document.body.classList.toggle('archive-open', open);
+	if (archiveBtn) {
+		archiveBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+		archiveBtn.setAttribute('aria-label', open ? 'Close saved globes' : 'Open saved globes');
+		archiveBtn.title = open ? 'Close saved globes' : 'Saved globes';
+	}
+	if (archivePane) {
+		archivePane.setAttribute('aria-hidden', open ? 'false' : 'true');
+	}
+}
+
 function initFullscreen() {
 	if (!fullscreenBtn) return;
 	const supported =
@@ -809,41 +1021,24 @@ function initFullscreen() {
 	syncFullscreenUi();
 }
 
-function initArchiveSelect() {
-	if (!selectEl) return;
-	selectEl.addEventListener('change', () => {
-		selectedArchive = selectEl.value;
-		if (selectedArchive) {
-			stopPolling();
-			void loadArchivedPreview(selectedArchive).catch((err) => {
-				const message = err instanceof Error ? err.message : 'Could not load saved preview.';
-				setStatus(message);
-			});
-		} else {
-			loadedPreviewUrl = '';
-			startPolling();
-			void refreshLive();
-		}
+function initArchivePane() {
+	if (!archiveBtn || !archivePane) return;
+	setArchivePaneOpen(false);
+	archiveBtn.addEventListener('click', () => {
+		setArchivePaneOpen(!archivePaneOpen);
+		if (archivePaneOpen) void refreshArchiveList();
+	});
+	document.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape' && archivePaneOpen) setArchivePaneOpen(false);
 	});
 }
 
 async function boot() {
 	initFullscreen();
-	initArchiveSelect();
+	initArchivePane();
 	await refreshArchiveList();
-	if (selectedArchive) {
-		await loadArchivedPreview(selectedArchive).catch((err) => {
-			const message = err instanceof Error ? err.message : 'Could not load saved preview.';
-			setStatus(message);
-			selectedArchive = '';
-			if (selectEl) selectEl.value = '';
-			void refreshLive();
-			startPolling();
-		});
-	} else {
-		await refreshLive();
-		startPolling();
-	}
+	await refreshLive();
+	startPolling();
 }
 
 void boot();
