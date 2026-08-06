@@ -9,6 +9,18 @@ import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 /** Production Globus Maker origin (API + preview files). */
 const GLOBE_ORIGIN = 'https://globe.rgb.sk';
 
+/**
+ * Saved previews live on the monitor host (not the API):
+ *   GET  /globe-preview/list.php           → JSON filename list
+ *   POST /globe-preview/save.php?name=…    → store JPEG body
+ *   GET  /globe-preview/<file>             → static image
+ * Prod: tiny PHP on Apache/FPM. Local: Vite middleware.
+ */
+const PREVIEW_DIR_URL = new URL('/globe-preview/', location.origin).href;
+const PREVIEW_LIST_URL = new URL('list.php', PREVIEW_DIR_URL).href;
+const PREVIEW_SAVE_URL = new URL('save.php', PREVIEW_DIR_URL).href;
+const IMAGE_NAME_RE = /\.(jpe?g|png|webp)$/i;
+
 /** Optional override: ?origin=http://localhost:8787 for local API. */
 const originParam = new URLSearchParams(location.search).get('origin');
 const API_ORIGIN = (originParam || GLOBE_ORIGIN).replace(/\/$/, '');
@@ -20,6 +32,8 @@ const EARTH_AXIAL_TILT_DEG = 23.44;
 
 const container = document.getElementById('globe');
 const statusEl = document.getElementById('status');
+const selectEl = document.getElementById('preview-select');
+const fullscreenBtn = document.getElementById('fullscreen-btn');
 
 let renderer = null;
 let animationId = 0;
@@ -27,6 +41,12 @@ let resizeObserver = null;
 let onWindowResize = null;
 let sceneResources = null;
 let loadedPreviewUrl = '';
+/** Empty string = follow latest API job; otherwise a filename under /globe-preview/. */
+let selectedArchive = '';
+let archivedNames = [];
+/** Place label for the live (API) option — updated on each successful live fetch. */
+let liveDisplayName = '';
+let pollTimer = 0;
 
 function setStatus(message) {
 	if (!statusEl) return;
@@ -522,9 +542,191 @@ async function fetchLatestGlobe() {
 	return response.json();
 }
 
-async function refresh() {
+/** Parse Apache/nginx autoindex HTML (or a plain newline list) into image filenames. */
+function parseDirectoryListing(text) {
+	const names = new Set();
+	const hrefRe = /href\s*=\s*["']([^"']+)["']/gi;
+	let match;
+	while ((match = hrefRe.exec(text))) {
+		let href = match[1].trim();
+		if (!href || href === '/' || href.startsWith('?') || href.startsWith('#')) continue;
+		try {
+			href = decodeURIComponent(href);
+		} catch {
+			/* keep raw */
+		}
+		const base = href.split(/[?#]/)[0].replace(/\/$/, '').split('/').pop() || '';
+		if (!base || base === '..' || base === '.') continue;
+		if (!IMAGE_NAME_RE.test(base)) continue;
+		names.add(base);
+	}
+	if (names.size === 0) {
+		for (const line of text.split(/\r?\n/)) {
+			const base = line.trim().split(/[/?#]/).pop() || '';
+			if (IMAGE_NAME_RE.test(base)) names.add(base);
+		}
+	}
+	return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+async function listArchivedPreviews() {
+	try {
+		const response = await fetch(`${PREVIEW_LIST_URL}?t=${Date.now()}`, {
+			cache: 'no-store',
+			headers: { Accept: 'application/json, text/plain, */*' }
+		});
+		if (!response.ok) return archivedNames;
+		const text = await response.text();
+		try {
+			const data = JSON.parse(text);
+			if (Array.isArray(data)) {
+				archivedNames = data
+					.map((name) => String(name))
+					.filter((name) => IMAGE_NAME_RE.test(name))
+					.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+				return archivedNames;
+			}
+		} catch {
+			/* fall through to HTML directory listing */
+		}
+		archivedNames = parseDirectoryListing(text);
+		return archivedNames;
+	} catch {
+		return archivedNames;
+	}
+}
+
+function archiveUrl(filename) {
+	return new URL(encodeURIComponent(filename), PREVIEW_DIR_URL).href;
+}
+
+function previewDirLabel() {
+	try {
+		return new URL(PREVIEW_DIR_URL).pathname;
+	} catch {
+		return '/globe-preview/';
+	}
+}
+
+function sanitizeArchiveName(raw) {
+	const base = String(raw || 'globe')
+		.normalize('NFKD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.replace(/[^a-zA-Z0-9._-]+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^[-.]+|[-.]+$/g, '')
+		.slice(0, 80);
+	const stem = base || 'globe';
+	return IMAGE_NAME_RE.test(stem) ? stem : `${stem}.jpg`;
+}
+
+function archiveNameForJob(job) {
+	const place = job.placeName ? String(job.placeName) : 'globe';
+	const id = job.id ? String(job.id).slice(0, 12) : String(Date.now());
+	return sanitizeArchiveName(`${place}-${id}.jpg`);
+}
+
+/** Dropdown label: drop extension and trailing job-id / timestamp suffix. */
+function archiveDisplayLabel(filename) {
+	const stem = String(filename || '').replace(IMAGE_NAME_RE, '');
+	const withoutId = stem.replace(/-(?:[0-9a-f]{8}-[0-9a-f]{3}|\d{10,})$/i, '');
+	return withoutId || stem || filename;
+}
+
+function liveOptionLabel() {
+	return liveDisplayName || 'Latest';
+}
+
+function placeLabelFromJob(job) {
+	if (!job || job.fallback === true) return 'Unavailable';
+	const place = job.placeName != null ? String(job.placeName).trim() : '';
+	return place || 'Globe';
+}
+
+function rebuildSelectOptions(selected = selectedArchive) {
+	if (!selectEl) return;
+	const keep = selected;
+	selectEl.replaceChildren();
+	const live = document.createElement('option');
+	live.value = '';
+	live.textContent = liveOptionLabel();
+	selectEl.appendChild(live);
+	for (const name of archivedNames) {
+		const opt = document.createElement('option');
+		opt.value = name;
+		opt.textContent = archiveDisplayLabel(name);
+		selectEl.appendChild(opt);
+	}
+	selectEl.value = keep && archivedNames.includes(keep) ? keep : '';
+	selectedArchive = selectEl.value;
+}
+
+async function refreshArchiveList({ keepSelection = true } = {}) {
+	await listArchivedPreviews();
+	rebuildSelectOptions(keepSelection ? selectedArchive : '');
+}
+
+async function savePreviewIfNew(filename, sourceUrl) {
+	if (!filename || !sourceUrl) return;
+	if (archivedNames.includes(filename)) return;
+
+	const head = await fetch(archiveUrl(filename), { method: 'HEAD', cache: 'no-store' }).catch(
+		() => null
+	);
+	if (head?.ok) {
+		if (!archivedNames.includes(filename)) {
+			archivedNames = [...archivedNames, filename].sort((a, b) =>
+				a.localeCompare(b, undefined, { sensitivity: 'base' })
+			);
+			rebuildSelectOptions();
+		}
+		return;
+	}
+
+	const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
+	if (!imageRes.ok) return;
+	const blob = await imageRes.blob();
+	const saveUrl = `${PREVIEW_SAVE_URL}?name=${encodeURIComponent(filename)}`;
+	const saveRes = await fetch(saveUrl, {
+		method: 'POST',
+		body: blob,
+		headers: {
+			'Content-Type': blob.type || 'image/jpeg'
+		}
+	});
+	if (!saveRes.ok && saveRes.status !== 201 && saveRes.status !== 204) {
+		console.warn(
+			`Could not archive preview (${saveRes.status}). Check PHP write access on ${previewDirLabel()}`
+		);
+		return;
+	}
+	archivedNames = [...new Set([...archivedNames, filename])].sort((a, b) =>
+		a.localeCompare(b, undefined, { sensitivity: 'base' })
+	);
+	rebuildSelectOptions();
+}
+
+async function loadArchivedPreview(filename) {
+	if (!container) throw new Error('Missing #globe container');
+	const url = archiveUrl(filename);
+	if (url === loadedPreviewUrl && renderer) {
+		setStatus('');
+		return;
+	}
+	setStatus('Loading saved preview…');
+	await mountGlobe(container, url, { depolarSquare: false });
+	loadedPreviewUrl = url;
+	document.title = `${filename} — Globe Monitor`;
+	setStatus('');
+}
+
+async function refreshLive() {
+	if (selectedArchive) return;
+
 	try {
 		const job = await fetchLatestGlobe();
+		liveDisplayName = placeLabelFromJob(job);
+		rebuildSelectOptions();
 
 		const previewUrl = resolvePreviewUrl(job.spherePreviewUrl, {
 			fallback: job.fallback === true
@@ -547,18 +749,106 @@ async function refresh() {
 		loadedPreviewUrl = previewUrl;
 		setStatus('');
 
-		document.title = job.placeName
-			? `${job.placeName} — Globe Monitor`
-			: 'Globus Maker — Globe Monitor';
+		document.title =
+			liveDisplayName && liveDisplayName !== 'Unavailable'
+				? `${liveDisplayName} — Globe Monitor`
+				: 'Globus Maker — Globe Monitor';
+
+		if (job.fallback !== true && job.id) {
+			void savePreviewIfNew(archiveNameForJob(job), previewUrl);
+		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Could not load globe preview.';
 		setStatus(message);
 	}
 }
 
-void refresh();
-setInterval(() => void refresh(), POLL_MS);
+function startPolling() {
+	stopPolling();
+	pollTimer = window.setInterval(() => {
+		if (!selectedArchive) void refreshLive();
+	}, POLL_MS);
+}
+
+function stopPolling() {
+	if (pollTimer) {
+		clearInterval(pollTimer);
+		pollTimer = 0;
+	}
+}
+
+function syncFullscreenUi() {
+	if (!fullscreenBtn) return;
+	const active = document.fullscreenElement != null;
+	fullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+	fullscreenBtn.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+	fullscreenBtn.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
+}
+
+async function toggleFullscreen() {
+	try {
+		if (document.fullscreenElement) {
+			await document.exitFullscreen();
+		} else if (typeof document.documentElement.requestFullscreen === 'function') {
+			await document.documentElement.requestFullscreen();
+		}
+	} catch {
+		/* denied */
+	}
+}
+
+function initFullscreen() {
+	if (!fullscreenBtn) return;
+	const supported =
+		!!document.fullscreenEnabled &&
+		typeof document.documentElement.requestFullscreen === 'function';
+	fullscreenBtn.hidden = !supported;
+	if (!supported) return;
+	fullscreenBtn.addEventListener('click', () => void toggleFullscreen());
+	document.addEventListener('fullscreenchange', syncFullscreenUi);
+	syncFullscreenUi();
+}
+
+function initArchiveSelect() {
+	if (!selectEl) return;
+	selectEl.addEventListener('change', () => {
+		selectedArchive = selectEl.value;
+		if (selectedArchive) {
+			stopPolling();
+			void loadArchivedPreview(selectedArchive).catch((err) => {
+				const message = err instanceof Error ? err.message : 'Could not load saved preview.';
+				setStatus(message);
+			});
+		} else {
+			loadedPreviewUrl = '';
+			startPolling();
+			void refreshLive();
+		}
+	});
+}
+
+async function boot() {
+	initFullscreen();
+	initArchiveSelect();
+	await refreshArchiveList();
+	if (selectedArchive) {
+		await loadArchivedPreview(selectedArchive).catch((err) => {
+			const message = err instanceof Error ? err.message : 'Could not load saved preview.';
+			setStatus(message);
+			selectedArchive = '';
+			if (selectEl) selectEl.value = '';
+			void refreshLive();
+			startPolling();
+		});
+	} else {
+		await refreshLive();
+		startPolling();
+	}
+}
+
+void boot();
 
 window.addEventListener('beforeunload', () => {
+	stopPolling();
 	disposeViewer();
 });

@@ -1,0 +1,3 @@
+# Static monitor site root (AllowOverride must permit Options at least).
+Options -Indexes
+DirectoryIndex index.html

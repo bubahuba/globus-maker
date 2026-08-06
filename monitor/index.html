@@ -13,6 +13,18 @@
 				box-sizing: border-box;
 			}
 
+			.sr-only {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				padding: 0;
+				margin: -1px;
+				overflow: hidden;
+				clip: rect(0, 0, 0, 0);
+				white-space: nowrap;
+				border: 0;
+			}
+
 			html,
 			body {
 				margin: 0;
@@ -132,6 +144,79 @@
 				text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 				color: white;
 			}
+
+			#controls {
+				position: fixed;
+				top: max(0.75rem, env(safe-area-inset-top));
+				right: max(0.75rem, env(safe-area-inset-right));
+				z-index: 4;
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				gap: 0.5rem;
+			}
+
+			#preview-select {
+				max-width: min(16rem, calc(100vw - 5.5rem));
+				height: 2.25rem;
+				padding: 0 0.65rem;
+				border: 1px solid rgba(231, 229, 228, 0.28);
+				border-radius: 0.55rem;
+				background: rgba(28, 25, 23, 0.82);
+				color: #e7e5e4;
+				font: inherit;
+				font-size: 0.78rem;
+				backdrop-filter: blur(8px);
+				-webkit-backdrop-filter: blur(8px);
+				box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+				cursor: pointer;
+			}
+
+			#preview-select:focus-visible {
+				outline: 2px solid #e7e5e4;
+				outline-offset: 2px;
+			}
+
+			#fullscreen-btn {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 2.25rem;
+				height: 2.25rem;
+				padding: 0;
+				border: 1px solid rgba(231, 229, 228, 0.28);
+				border-radius: 0.55rem;
+				background: rgba(28, 25, 23, 0.82);
+				color: #e7e5e4;
+				backdrop-filter: blur(8px);
+				-webkit-backdrop-filter: blur(8px);
+				box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+				cursor: pointer;
+			}
+
+			#fullscreen-btn:hover {
+				background: rgba(41, 37, 36, 0.92);
+			}
+
+			#fullscreen-btn:focus-visible {
+				outline: 2px solid #e7e5e4;
+				outline-offset: 2px;
+			}
+
+			#fullscreen-btn[hidden] {
+				display: none;
+			}
+
+			#fullscreen-btn svg {
+				display: none;
+				width: 1rem;
+				height: 1rem;
+			}
+
+			#fullscreen-btn[aria-pressed='false'] #fullscreen-enter-icon,
+			#fullscreen-btn[aria-pressed='true'] #fullscreen-exit-icon {
+				display: block;
+			}
 		</style>
 		<script type="importmap">
 			{
@@ -146,6 +231,53 @@
 		<div id="globe" aria-label="Globe preview"></div>
 		<p id="status">Loading latest globe…</p>
 		<p id="hint">Drag to orbit · scroll to zoom</p>
+		<div id="controls">
+			<label class="sr-only" for="preview-select">Saved globe preview</label>
+			<select id="preview-select" aria-label="Globe preview">
+				<option value="">Latest</option>
+			</select>
+			<button
+				type="button"
+				id="fullscreen-btn"
+				aria-label="Enter fullscreen"
+				aria-pressed="false"
+				title="Enter fullscreen"
+				hidden
+			>
+				<svg
+					id="fullscreen-enter-icon"
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M8 3H5a2 2 0 0 0-2 2v3" />
+					<path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+					<path d="M3 16v3a2 2 0 0 0 2 2h3" />
+					<path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+				</svg>
+				<svg
+					id="fullscreen-exit-icon"
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M8 3v3a2 2 0 0 1-2 2H3" />
+					<path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+					<path d="M3 16h3a2 2 0 0 1 2 2v3" />
+					<path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+				</svg>
+			</button>
+		</div>
 		<nav id="app-links" aria-label="Apps">
 			<a
 				class="app-link"
@@ -172,6 +304,6 @@
 				<span class="app-label">Globe Maker</span>
 			</a>
 		</nav>
-		<script type="module" src="./globe.js"></script>
+		<script type="module" src="./globe.js?v=7"></script>
 	</body>
 </html>
