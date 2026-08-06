@@ -1,9 +1,9 @@
 ---
-description: Globus Maker architecture, layout, and cross-cutting conventions
+description: Globe Maker architecture, layout, and cross-cutting conventions
 alwaysApply: true
 ---
 
-# Globus Maker
+# Globe Maker
 
 Web app to download an OSM region as a square map, or generate globe meridian stripes (SVG stitch + Panotools `slize.pl` JPEG stripes).
 

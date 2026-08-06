@@ -112,7 +112,7 @@
 			Your place, as a map or a globe
 		</h1>
 		<p class="text-lg leading-relaxed text-ink-secondary">
-			Pick any spot on the map. Globus Maker builds a clean OpenStreetMap export you can print
+			Pick any spot on the map. Globe Maker builds a clean OpenStreetMap export you can print
 			flat, or cut into stripes for a physical globe. Quiet natural colors — or push every layer
 			into something unexpected.
 		</p>
@@ -230,7 +230,7 @@
 				href="/"
 				class="inline-flex items-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-contrast transition hover:bg-accent-hover"
 			>
-				Open Globus Maker App
+				Open Globe Maker App
 			</a>
 		</p>
 	</section>

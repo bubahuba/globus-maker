@@ -1,9 +1,9 @@
 ---
 name: globus-local-dev
-description: Start and troubleshoot Globus Maker local development (processor, API, frontend). Use when running the app locally, fixing dev environment issues, or when API/processor connection errors appear.
+description: Start and troubleshoot Globe Maker local development (processor, API, frontend). Use when running the app locally, fixing dev environment issues, or when API/processor connection errors appear.
 ---
 
-# Globus Maker Local Dev
+# Globe Maker Local Dev
 
 ## Prerequisites
 

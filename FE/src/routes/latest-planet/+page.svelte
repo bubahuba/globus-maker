@@ -162,7 +162,7 @@
 
 <SeoHead
 	title={`Latest planet — ${SITE_NAME}`}
-	description="Watch the most recently generated Globus Maker globe, with stars, sun, and atmosphere."
+	description="Watch the most recently generated Globe Maker globe, with stars, sun, and atmosphere."
 	images={HOME_OG_IMAGES}
 />
 

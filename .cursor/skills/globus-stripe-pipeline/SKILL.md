@@ -1,6 +1,6 @@
 ---
 name: globus-stripe-pipeline
-description: Understand and modify the Globus Maker job pipeline from map selection to map/stripe zip download. Use when changing job flow, tile math, stripe dimensions, processor integration, or map rendering.
+description: Understand and modify the Globe Maker job pipeline from map selection to map/stripe zip download. Use when changing job flow, tile math, stripe dimensions, processor integration, or map rendering.
 ---
 
 # Map / Globe Generation Pipeline

@@ -1,5 +1,5 @@
 ---
-description: SvelteKit 5 frontend patterns for Globus Maker
+description: SvelteKit 5 frontend patterns for Globe Maker
 globs: FE/**/*
 alwaysApply: false
 ---

@@ -1,6 +1,6 @@
 /** Shared Open Graph / Twitter card metadata. Images live in `static/about/`. */
 
-export const SITE_NAME = 'Globus Maker';
+export const SITE_NAME = 'Globe Maker';
 
 /**
  * Canonical public origin baked into prerendered HTML for og:url / og:image.

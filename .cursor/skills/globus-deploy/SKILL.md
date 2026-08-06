@@ -1,6 +1,6 @@
 ---
 name: globus-deploy
-description: Deploy Globus Maker to Cloudflare Workers with R2. Use when deploying, configuring production bindings, or debugging Cloudflare-specific runtime issues.
+description: Deploy Globe Maker to Cloudflare Workers with R2. Use when deploying, configuring production bindings, or debugging Cloudflare-specific runtime issues.
 ---
 
 # Deploy to Cloudflare

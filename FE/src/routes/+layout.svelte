@@ -8,7 +8,7 @@
 
 <svelte:head>
 	<link rel="stylesheet" href={appCss} />
-	<title>Globus Maker</title>
+	<title>Globe Maker</title>
 </svelte:head>
 
 <div class="min-h-screen">

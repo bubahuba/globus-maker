@@ -1,4 +1,4 @@
-# Globus Maker
+# Globe Maker
 
 Web app to download an OpenStreetMap region and generate globe meridian stripes using the Panotools pipeline from [`slize.pl`](../ziman-globusator/slize.pl).
 

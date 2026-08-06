@@ -1,12 +1,12 @@
 /**
  * Full-window Three.js globe monitor — mirrors FE DistortedPanoramaViewer.
- * Fetches the latest globe job from Globus Maker (any host can serve this folder).
+ * Fetches the latest globe job from Globe Maker (any host can serve this folder).
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
-/** Production Globus Maker origin (API + preview files). */
+/** Production Globe Maker origin (API + preview files). */
 const GLOBE_ORIGIN = 'https://globe.rgb.sk';
 
 /**
@@ -266,7 +266,7 @@ function createSunLensflare(position) {
 }
 
 /**
- * API paths (`/api/...`) → Globus Maker origin.
+ * API paths (`/api/...`) → Globe Maker origin.
  * Monitor-relative fallbacks (`rip.jpeg`) → this page's directory.
  */
 function resolvePreviewUrl(pathOrUrl, { fallback = false } = {}) {
@@ -971,7 +971,7 @@ async function refreshLive() {
 		document.title =
 			liveDisplayName && liveDisplayName !== 'Unavailable'
 				? `${liveDisplayName} — Globe Monitor`
-				: 'Globus Maker — Globe Monitor';
+				: 'Globe Maker — Globe Monitor';
 
 		if (job.fallback !== true && job.id) {
 			void archiveLivePreview(archiveNameForJob(job), previewUrl);

@@ -131,7 +131,7 @@ export async function createGlobeDownloadOrder(
       application_context: {
         shipping_preference: "NO_SHIPPING",
         user_action: "PAY_NOW",
-        brand_name: "Globus Maker",
+        brand_name: "Globe Maker",
       },
     }),
   });

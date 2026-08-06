@@ -1,6 +1,6 @@
 {
-	"name": "Globus Maker",
-	"short_name": "Globus Maker",
+	"name": "Globe Maker",
+	"short_name": "Globe Maker",
 	"description": "Export a square city map or globe meridian stripes from OpenStreetMap.",
 	"start_url": "/",
 	"display": "standalone",

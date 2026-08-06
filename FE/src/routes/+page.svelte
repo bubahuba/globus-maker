@@ -576,7 +576,7 @@
 <SeoHead title={SITE_NAME} description={HOME_DESCRIPTION} images={HOME_OG_IMAGES} />
 <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8">
 	<header class="space-y-2">
-		<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">Globus Maker</p>
+		<p class="text-sm font-medium tracking-wide text-accent-ink uppercase">Globe Maker</p>
 		<h1 class="text-3xl font-semibold text-ink">Map a region, or print globe stripes</h1>
 		<p class="max-w-2xl text-ink-secondary">
 			Search for any place or click the map to choose a square region. Export a square map, or

@@ -1,4 +1,4 @@
-# Globus Maker — Agent Guide
+# Globe Maker — Agent Guide
 
 Web app: select an OSM region → export a square map (Map mode) or generate globe meridian stripe JPEGs (Globe mode).
 

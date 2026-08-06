@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 
 	const links = [
-		{ href: '/', label: 'Globus Maker App' },
+		{ href: '/', label: 'Globe Maker App' },
 		{ href: '/latest-planet', label: 'Latest planet' },
 		{ href: '/about', label: 'About this app' }
 	] as const;
@@ -38,7 +38,7 @@
 				class="h-8 w-8 rounded-lg shadow-sm ring-1 ring-line/80"
 				decoding="async"
 			/>
-			<span>Globus Maker</span>
+			<span>Globe Maker</span>
 		</a>
 
 		<nav class="hidden items-center gap-1 sm:flex" aria-label="Main">
