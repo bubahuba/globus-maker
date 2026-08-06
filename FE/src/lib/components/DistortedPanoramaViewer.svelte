@@ -44,11 +44,6 @@
 	/** Assume supported; hide only if the API is clearly missing after mount. */
 	let fullscreenSupported = $state(true);
 
-	/** Path only — ignore ?v= cache-bust so stripe uploads don't remount the globe. */
-	const loadKey = $derived(
-		`${src.split('?')[0] || src}|${variant}|${depolarSquare}|${emptyFillColor}`
-	);
-
 	function syncFullscreenState() {
 		isFullscreen = document.fullscreenElement === shellEl;
 	}
@@ -66,7 +61,10 @@
 		}
 	}
 
-	let loadedKey = '';
+	let loadedPreviewUrl = '';
+	let loadedVariant: 'card' | 'stage' | '' = '';
+	/** Ignore stale async texture loads when polls/clicks overlap. */
+	let textureLoadSeq = 0;
 	let renderer: THREE.WebGLRenderer | null = null;
 	let animationId = 0;
 	let resizeObserver: ResizeObserver | null = null;
@@ -74,7 +72,7 @@
 		scene: THREE.Scene;
 		camera: THREE.PerspectiveCamera;
 		geometry: THREE.BufferGeometry;
-		material: THREE.Material;
+		material: THREE.MeshStandardMaterial;
 		texture: THREE.Texture;
 		controls: OrbitControls;
 		globe: THREE.Object3D;
@@ -88,6 +86,32 @@
 		atmosphereGeometry: THREE.BufferGeometry;
 		atmosphereMaterial: THREE.Material;
 	} | null = null;
+
+	function viewerReady(): boolean {
+		return !!(renderer && sceneResources?.material && sceneResources?.globe && sceneResources?.controls);
+	}
+
+	/** Snapshot view so a texture swap never drifts camera / spin. */
+	function captureViewState() {
+		if (!viewerReady() || !sceneResources) return null;
+		const { camera, controls, globe } = sceneResources;
+		return {
+			cameraPos: camera.position.clone(),
+			target: controls.target.clone(),
+			spinY: globe.rotation.y
+		};
+	}
+
+	function restoreViewState(
+		state: { cameraPos: THREE.Vector3; target: THREE.Vector3; spinY: number } | null
+	) {
+		if (!state || !viewerReady() || !sceneResources) return;
+		const { camera, controls, globe } = sceneResources;
+		camera.position.copy(state.cameraPos);
+		controls.target.copy(state.target);
+		globe.rotation.y = state.spinY;
+		controls.update();
+	}
 
 	function parseHex(hex: string): { r: number; g: number; b: number } | null {
 		const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
@@ -582,7 +606,80 @@
 		};
 		tick();
 
+		loadedPreviewUrl = url;
+		loadedVariant = isStage ? 'stage' : 'card';
 		statusMessage = '';
+	}
+
+	/**
+	 * Swap globe albedo only — keeps camera, orbit target, and spin.
+	 * Mounts the full scene only on first load (or variant change).
+	 */
+	async function applyGlobeTexture(
+		el: HTMLDivElement,
+		url: string,
+		opts: {
+			depolarSquare?: boolean;
+			emptyFillColor?: string;
+			variant?: 'card' | 'stage';
+		} = {}
+	) {
+		const nextVariant = opts.variant ?? 'card';
+		if (!viewerReady() || loadedVariant !== nextVariant) {
+			await mountGlobe(el, url, opts);
+			return;
+		}
+		if (url === loadedPreviewUrl) return;
+
+		const seq = ++textureLoadSeq;
+		const view = captureViewState();
+		const texture = await loadTexture(url, opts);
+		if (seq !== textureLoadSeq || !viewerReady() || !sceneResources) {
+			texture.dispose();
+			return;
+		}
+
+		const prev = sceneResources.texture;
+		sceneResources.material.map = texture;
+		sceneResources.material.needsUpdate = true;
+		sceneResources.texture = texture;
+		prev?.dispose();
+		restoreViewState(view);
+		loadedPreviewUrl = url;
+	}
+
+	/** Silent hot-swap when already viewing; overlay only for first mount. */
+	async function showGlobe(
+		el: HTMLDivElement,
+		url: string,
+		opts: {
+			depolarSquare?: boolean;
+			emptyFillColor?: string;
+			variant?: 'card' | 'stage';
+		} = {}
+	) {
+		const hot = viewerReady() && loadedVariant === (opts.variant ?? 'card');
+		if (hot && url === loadedPreviewUrl) {
+			statusMessage = '';
+			return;
+		}
+		if (!hot) statusMessage = 'Loading preview…';
+		try {
+			await applyGlobeTexture(el, url, opts);
+			statusMessage = '';
+		} catch (err) {
+			if (!hot) {
+				disposeViewer();
+				loadedPreviewUrl = '';
+				loadedVariant = '';
+				statusMessage =
+					err instanceof Error ? err.message : 'Could not open sphere preview.';
+				return;
+			}
+			// Keep the current globe on screen if a background poll fails mid-swap.
+			console.warn('Texture hot-reload failed', err);
+			statusMessage = '';
+		}
 	}
 
 	onMount(() => {
@@ -602,41 +699,26 @@
 		if (!browser) return;
 
 		const el = container;
-		const key = loadKey;
 		const url = src;
 		const mountOpts = {
 			depolarSquare,
 			emptyFillColor,
 			variant
 		};
-		if (!el || !key || !url) return;
-		if (key === loadedKey && renderer) return;
+		if (!el || !url) return;
 
-		loadedKey = key;
-		statusMessage = 'Loading sphere preview…';
-		let cancelled = false;
-
-		void (async () => {
-			try {
-				// Load with full URL (incl. ?v= cache-bust); key only dedupes remounts.
-				await mountGlobe(el, url, mountOpts);
-				if (cancelled) disposeViewer();
-			} catch (err) {
-				if (cancelled) return;
-				disposeViewer();
-				statusMessage =
-					err instanceof Error ? err.message : 'Could not open sphere preview.';
-			}
-		})();
+		void showGlobe(el, url, mountOpts);
 
 		return () => {
-			cancelled = true;
+			// Invalidate in-flight texture loads when src/opts change or the effect re-runs.
+			textureLoadSeq += 1;
 		};
 	});
 
 	onDestroy(() => {
 		disposeViewer();
-		loadedKey = '';
+		loadedPreviewUrl = '';
+		loadedVariant = '';
 	});
 
 	/** Snapshot the WebGL canvas for archive gallery thumbs (stage / preserveDrawingBuffer). */
