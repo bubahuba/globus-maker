@@ -33,9 +33,17 @@
 	let archivePaneOpen = $state(false);
 
 	let viewer = $state<ViewerHandle | undefined>();
+	let stageEl = $state<HTMLElement | undefined>();
+	let isFullscreen = $state(false);
+	let fullscreenSupported = $state(false);
 	let pollId: ReturnType<typeof setInterval> | undefined;
 
 	const textureNames = $derived(archivedNames.filter((name) => !isThumbFilename(name)));
+	const controlsRight = $derived(
+		archivePaneOpen
+			? 'calc(min(20rem, 85vw) + 0.75rem)'
+			: 'max(0.75rem, env(safe-area-inset-right))'
+	);
 
 	function stopPolling() {
 		if (pollId != null) {
@@ -106,7 +114,27 @@
 		if (open) void refreshArchiveList();
 	}
 
+	function syncFullscreenState() {
+		isFullscreen = !!stageEl && document.fullscreenElement === stageEl;
+	}
+
+	async function toggleFullscreen() {
+		if (!stageEl) return;
+		try {
+			if (document.fullscreenElement === stageEl) {
+				await document.exitFullscreen();
+			} else if (typeof stageEl.requestFullscreen === 'function') {
+				await stageEl.requestFullscreen();
+			}
+		} catch {
+			/* denied */
+		}
+	}
+
 	onMount(() => {
+		fullscreenSupported =
+			!!document.fullscreenEnabled && typeof document.documentElement.requestFullscreen === 'function';
+
 		void (async () => {
 			await refreshArchiveList();
 			await refreshLive();
@@ -114,10 +142,17 @@
 		})();
 
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape' && archivePaneOpen) setArchivePaneOpen(false);
+			if (event.key === 'Escape' && archivePaneOpen && !document.fullscreenElement) {
+				setArchivePaneOpen(false);
+			}
 		};
 		document.addEventListener('keydown', onKey);
-		return () => document.removeEventListener('keydown', onKey);
+		document.addEventListener('fullscreenchange', syncFullscreenState);
+		syncFullscreenState();
+		return () => {
+			document.removeEventListener('keydown', onKey);
+			document.removeEventListener('fullscreenchange', syncFullscreenState);
+		};
 	});
 
 	onDestroy(() => {
@@ -131,7 +166,12 @@
 	images={HOME_OG_IMAGES}
 />
 
-<main class="relative h-[calc(100dvh-3.75rem)] w-full overflow-hidden bg-black">
+<main
+	bind:this={stageEl}
+	class="relative w-full overflow-hidden bg-black {isFullscreen
+		? 'h-screen'
+		: 'h-[calc(100dvh-3.75rem)]'}"
+>
 	{#if previewUrl}
 		<DistortedPanoramaViewer
 			bind:this={viewer}
@@ -140,9 +180,7 @@
 			variant="stage"
 			depolarSquare={fallback}
 			emptyFillColor={emptyFill}
-			controlsOffsetRight={archivePaneOpen
-				? 'calc(min(20rem, 85vw) + 3.5rem)'
-				: '3.5rem'}
+			hideFullscreenButton={true}
 		/>
 		{#if placeName && !selectedArchive}
 			<p
@@ -169,9 +207,7 @@
 
 	<div
 		class="absolute top-3 z-40 flex items-center gap-2 transition-[right] duration-200 ease-out"
-		style:right={archivePaneOpen
-			? 'calc(min(20rem, 85vw) + 0.75rem)'
-			: 'max(0.75rem, env(safe-area-inset-right))'}
+		style:right={controlsRight}
 	>
 		<button
 			type="button"
@@ -199,6 +235,52 @@
 				<rect width="7" height="7" x="3" y="14" rx="1" />
 			</svg>
 		</button>
+		{#if fullscreenSupported}
+			<button
+				type="button"
+				class="flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
+				aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+				aria-pressed={isFullscreen}
+				title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+				onclick={() => void toggleFullscreen()}
+			>
+				{#if isFullscreen}
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="h-4 w-4"
+						aria-hidden="true"
+					>
+						<path d="M8 3v3a2 2 0 0 1-2 2H3" />
+						<path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+						<path d="M3 16h3a2 2 0 0 1 2 2v3" />
+						<path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+					</svg>
+				{:else}
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						class="h-4 w-4"
+						aria-hidden="true"
+					>
+						<path d="M8 3H5a2 2 0 0 0-2 2v3" />
+						<path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+						<path d="M3 16v3a2 2 0 0 0 2 2h3" />
+						<path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+					</svg>
+				{/if}
+			</button>
+		{/if}
 	</div>
 
 	<aside
