@@ -33,6 +33,7 @@ const EARTH_AXIAL_TILT_DEG = 23.44;
 
 const container = document.getElementById('globe');
 const statusEl = document.getElementById('status');
+const placeLabelEl = document.getElementById('place-label');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const archiveBtn = document.getElementById('archive-btn');
 const archivePane = document.getElementById('archive-pane');
@@ -65,6 +66,19 @@ function setStatus(message) {
 		statusEl.hidden = true;
 		statusEl.textContent = '';
 	}
+}
+
+/** Upper-left place chip (matches FE /latest-planet). */
+function setPlaceLabel(label) {
+	if (!placeLabelEl) return;
+	const text = label != null ? String(label).trim() : '';
+	if (!text || text === 'Unavailable') {
+		placeLabelEl.hidden = true;
+		placeLabelEl.textContent = '';
+		return;
+	}
+	placeLabelEl.hidden = false;
+	placeLabelEl.textContent = text;
 }
 
 function parseHex(hex) {
@@ -904,7 +918,9 @@ async function refreshArchiveList() {
 async function loadArchivedPreview(filename) {
 	const url = archiveUrl(filename);
 	await showGlobe(url, { depolarSquare: false });
-	document.title = `${archiveDisplayLabel(filename)} — Globe Monitor`;
+	const label = archiveDisplayLabel(filename);
+	setPlaceLabel(label);
+	document.title = `${label} — Globe Monitor`;
 }
 
 async function selectArchive(filename) {
@@ -949,6 +965,9 @@ async function refreshLive() {
 		// Poll / latest check: hot-swap texture in place (no camera reset, no black overlay).
 		await showGlobe(previewUrl, opts);
 
+		setPlaceLabel(
+			liveDisplayName && liveDisplayName !== 'Unavailable' ? liveDisplayName : ''
+		);
 		document.title =
 			liveDisplayName && liveDisplayName !== 'Unavailable'
 				? `${liveDisplayName} — Globe Monitor`
