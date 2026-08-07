@@ -209,32 +209,6 @@
 		class="absolute top-3 z-40 flex items-center gap-2 transition-[right] duration-200 ease-out"
 		style:right={controlsRight}
 	>
-		<button
-			type="button"
-			class="flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
-			aria-label={archivePaneOpen ? 'Close saved globes' : 'Open saved globes'}
-			aria-pressed={archivePaneOpen}
-			aria-controls="archive-pane"
-			title={archivePaneOpen ? 'Close saved globes' : 'Saved globes'}
-			onclick={() => setArchivePaneOpen(!archivePaneOpen)}
-		>
-			<svg
-				xmlns="http://www.w3.org/2000/svg"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				class="h-4 w-4"
-				aria-hidden="true"
-			>
-				<rect width="7" height="7" x="3" y="3" rx="1" />
-				<rect width="7" height="7" x="14" y="3" rx="1" />
-				<rect width="7" height="7" x="14" y="14" rx="1" />
-				<rect width="7" height="7" x="3" y="14" rx="1" />
-			</svg>
-		</button>
 		{#if fullscreenSupported}
 			<button
 				type="button"
@@ -281,6 +255,32 @@
 				{/if}
 			</button>
 		{/if}
+		<button
+			type="button"
+			class="flex h-9 w-9 items-center justify-center rounded-lg bg-panel/90 text-ink-secondary shadow-md ring-1 ring-line-strong/80 backdrop-blur-sm transition hover:bg-panel"
+			aria-label={archivePaneOpen ? 'Close saved globes' : 'Open saved globes'}
+			aria-pressed={archivePaneOpen}
+			aria-controls="archive-pane"
+			title={archivePaneOpen ? 'Close saved globes' : 'Saved globes'}
+			onclick={() => setArchivePaneOpen(!archivePaneOpen)}
+		>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				class="h-4 w-4"
+				aria-hidden="true"
+			>
+				<rect width="7" height="7" x="3" y="3" rx="1" />
+				<rect width="7" height="7" x="14" y="3" rx="1" />
+				<rect width="7" height="7" x="14" y="14" rx="1" />
+				<rect width="7" height="7" x="3" y="14" rx="1" />
+			</svg>
+		</button>
 	</div>
 
 	<aside
