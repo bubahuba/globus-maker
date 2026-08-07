@@ -201,46 +201,43 @@
 		? 'h-screen'
 		: 'h-[calc(100dvh-3.75rem)]'}"
 >
-	{#if previewUrl}
-		<DistortedPanoramaViewer
-			bind:this={viewer}
-			src={previewUrl}
-			title={placeName ?? 'Latest planet'}
-			variant="stage"
-			depolarSquare={fallback}
-			emptyFillColor={emptyFill}
-			hideFullscreenButton={true}
-		/>
-		{#if placeName && !selectedArchive}
-			{#if liveJobId}
-				<a
-					href={`/?job=${encodeURIComponent(liveJobId)}`}
-					class="absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm transition hover:bg-black/55 hover:underline"
-					title="Open job"
-				>
-					{placeName}
-				</a>
-			{:else}
-				<p
-					class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
-				>
-					{placeName}
-				</p>
-			{/if}
-		{:else if selectedArchive}
+	<DistortedPanoramaViewer
+		bind:this={viewer}
+		src={previewUrl ?? ''}
+		title={placeName ?? 'Latest planet'}
+		variant="stage"
+		depolarSquare={fallback}
+		emptyFillColor={emptyFill}
+		hideFullscreenButton={true}
+	/>
+	{#if previewUrl && placeName && !selectedArchive}
+		{#if liveJobId}
+			<a
+				href={`/?job=${encodeURIComponent(liveJobId)}`}
+				class="absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm transition hover:bg-black/55 hover:underline"
+				title="Open job"
+			>
+				{placeName}
+			</a>
+		{:else}
 			<p
 				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
 			>
-				{labelForArchive(selectedArchive)}
+				{placeName}
 			</p>
 		{/if}
-	{:else if error}
-		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-ink-subtle">
-			{error}
+	{:else if selectedArchive}
+		<p
+			class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
+		>
+			{labelForArchive(selectedArchive)}
 		</p>
-	{:else}
-		<p class="flex h-full items-center justify-center px-4 text-center text-sm text-ink-subtle">
-			Loading latest globe…
+	{/if}
+	{#if error && !previewUrl}
+		<p
+			class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center px-4 text-center text-sm text-ink-subtle"
+		>
+			{error}
 		</p>
 	{/if}
 

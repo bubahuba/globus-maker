@@ -11,6 +11,13 @@
 	const SUN_DIR = new THREE.Vector3(4.2, 1.4, 2.6);
 	/** Earth obliquity — north pole tipped toward the sun (NH summer). */
 	const EARTH_AXIAL_TILT_DEG = 23.44;
+	/** Far start for first-mount zoom — planet reads as a bright star. */
+	const INTRO_DISTANCE = 95;
+	const CAMERA_FAR = 280;
+	const INTRO_ZOOM_MS = 2400;
+	const CARD_LOOK = new THREE.Vector3(0, 0.35, 2.6);
+	const STAGE_LOOK = new THREE.Vector3(0, 0.95, 0.85);
+	const CARD_FRAMED_DISTANCE = CARD_LOOK.length();
 
 	interface Props {
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
@@ -39,7 +46,7 @@
 
 	let shellEl: HTMLDivElement | undefined = $state();
 	let container: HTMLDivElement | undefined = $state();
-	let statusMessage = $state('Loading sphere preview…');
+	let statusMessage = $state('');
 	let isFullscreen = $state(false);
 	/** Assume supported; hide only if the API is clearly missing after mount. */
 	let fullscreenSupported = $state(true);
@@ -67,15 +74,27 @@
 	let textureLoadSeq = 0;
 	let renderer: THREE.WebGLRenderer | null = null;
 	let animationId = 0;
+	let introRaf = 0;
+	let introCancel: (() => void) | null = null;
+	/** In-flight first mount / intro; hot-swaps wait on these. */
+	let mounting: Promise<void> | null = null;
+	let finishing: Promise<void> | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let sceneResources: {
 		scene: THREE.Scene;
 		camera: THREE.PerspectiveCamera;
 		geometry: THREE.BufferGeometry;
 		material: THREE.MeshStandardMaterial;
-		texture: THREE.Texture;
+		texture: THREE.Texture | null;
 		controls: OrbitControls;
 		globe: THREE.Object3D;
+		earth: THREE.Object3D;
+		isStage: boolean;
+		lookDir: THREE.Vector3;
+		userMinDistance: number;
+		userMaxDistance: number;
+		introActive: boolean;
+		autoFrame: boolean;
 		onControlsStart?: () => void;
 		starsGeometry: THREE.BufferGeometry;
 		starsMaterial: THREE.Material;
@@ -86,6 +105,64 @@
 		atmosphereGeometry: THREE.BufferGeometry;
 		atmosphereMaterial: THREE.Material;
 	} | null = null;
+
+	function easeInOutCubic(t: number) {
+		return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+	}
+
+	function cancelIntroZoom() {
+		if (introRaf) {
+			cancelAnimationFrame(introRaf);
+			introRaf = 0;
+		}
+		if (introCancel) {
+			introCancel();
+			introCancel = null;
+		}
+	}
+
+	function framedFitDistance(camera: THREE.PerspectiveCamera) {
+		const vFov = THREE.MathUtils.degToRad(camera.fov);
+		const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+		const fitFov = Math.min(vFov, hFov);
+		return (1 / Math.sin(fitFov / 2)) * 1.2;
+	}
+
+	/** OrbitControls clamps to maxDistance — raise it for the far intro camera. */
+	function animateIntroZoom(
+		camera: THREE.PerspectiveCamera,
+		controls: OrbitControls,
+		fromDist: number,
+		toDist: number,
+		lookDir: THREE.Vector3
+	): Promise<void> {
+		cancelIntroZoom();
+		const dir = lookDir.clone().normalize();
+		return new Promise((resolve) => {
+			introCancel = () => resolve();
+			const start = performance.now();
+			const step = (now: number) => {
+				if (!sceneResources) {
+					introRaf = 0;
+					introCancel = null;
+					resolve();
+					return;
+				}
+				const t = Math.min(1, (now - start) / INTRO_ZOOM_MS);
+				const dist = fromDist + (toDist - fromDist) * easeInOutCubic(t);
+				camera.position.copy(controls.target).addScaledVector(dir, dist);
+				controls.update();
+				if (t < 1) {
+					introRaf = requestAnimationFrame(step);
+					return;
+				}
+				introRaf = 0;
+				introCancel = null;
+				resolve();
+			};
+			introRaf = requestAnimationFrame(step);
+		});
+	}
 
 	function viewerReady(): boolean {
 		return !!(renderer && sceneResources?.material && sceneResources?.globe && sceneResources?.controls);
@@ -282,7 +359,7 @@
 		const positions = new Float32Array(count * 3);
 		const colors = new Float32Array(count * 3);
 		for (let i = 0; i < count; i++) {
-			const r = 12 + Math.random() * 50;
+			const r = 18 + Math.random() * 200;
 			const theta = Math.random() * Math.PI * 2;
 			const phi = Math.acos(2 * Math.random() - 1);
 			const sinPhi = Math.sin(phi);
@@ -398,6 +475,7 @@
 	}
 
 	function disposeViewer() {
+		cancelIntroZoom();
 		if (animationId) {
 			cancelAnimationFrame(animationId);
 			animationId = 0;
@@ -411,7 +489,7 @@
 			sceneResources.controls.dispose();
 			sceneResources.geometry.dispose();
 			sceneResources.material.dispose();
-			sceneResources.texture.dispose();
+			sceneResources.texture?.dispose();
 			sceneResources.starsGeometry.dispose();
 			sceneResources.starsMaterial.dispose();
 			sceneResources.sunTexture.dispose();
@@ -464,32 +542,28 @@
 		return texture;
 	}
 
-	async function mountGlobe(
-		el: HTMLDivElement,
-		url: string,
-		opts: {
-			depolarSquare?: boolean;
-			emptyFillColor?: string;
-			variant?: 'card' | 'stage';
-		} = {}
-	) {
+	/** Sync starfield scene at intro distance — no texture load. */
+	function ensureScene(el: HTMLDivElement, variant: 'card' | 'stage' = 'card') {
+		if (viewerReady() && loadedVariant === variant) {
+			statusMessage = '';
+			return;
+		}
+
 		disposeViewer();
 		el.replaceChildren();
-		statusMessage = 'Loading preview…';
+		statusMessage = '';
+		loadedPreviewUrl = '';
 
-		const texture = await loadTexture(url, opts);
-		const isStage = opts.variant === 'stage';
+		const isStage = variant === 'stage';
+		const lookDir = (isStage ? STAGE_LOOK : CARD_LOOK).clone().normalize();
+		const userMinDistance = isStage ? 1.05 : 1.35;
+		const userMaxDistance = isStage ? 6 : 5;
 
 		const nextScene = new THREE.Scene();
 		nextScene.background = new THREE.Color(0x000000);
 
-		const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-		if (isStage) {
-			// Bias toward north pole (+Y); distance set by frameGlobe().
-			camera.position.set(0, 0.95, 0.85);
-		} else {
-			camera.position.set(0, 0.35, 2.6);
-		}
+		const camera = new THREE.PerspectiveCamera(40, 1, 0.1, CAMERA_FAR);
+		camera.position.copy(lookDir).multiplyScalar(INTRO_DISTANCE);
 
 		// preserveDrawingBuffer so stage archive thumbs can canvas.toBlob after render.
 		const webgl = new THREE.WebGLRenderer({
@@ -523,7 +597,7 @@
 		// DePolar panorama: top = map centre (north pole), bottom = rim / south.
 		const geometry = new THREE.SphereGeometry(1, 96, 64);
 		const material = new THREE.MeshStandardMaterial({
-			map: texture,
+			color: 0x0a0a12,
 			roughness: 0.92,
 			metalness: 0
 		});
@@ -531,6 +605,7 @@
 		const atmosphere = createAtmosphere();
 		// Tilted spin axis: north leans toward the sun (summer); daily rotation on local Y.
 		const earth = new THREE.Group();
+		earth.visible = false;
 		applySummerAxialTilt(earth, SUN_DIR);
 		earth.add(globe);
 		earth.add(atmosphere.mesh);
@@ -539,14 +614,14 @@
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.06;
-		controls.minDistance = isStage ? 1.05 : 1.35;
-		controls.maxDistance = isStage ? 6 : 5;
+		controls.minDistance = userMinDistance;
+		// Raised so OrbitControls.update() does not clamp the far intro camera.
+		controls.maxDistance = INTRO_DISTANCE + 1;
 		controls.target.set(0, 0, 0);
+		controls.enabled = false;
 
-		/** Keep contain-framing on resize until the user orbits / zooms (stage only). */
-		let autoFrame = isStage;
 		const onControlsStart = () => {
-			autoFrame = false;
+			if (sceneResources) sceneResources.autoFrame = false;
 		};
 		if (isStage) {
 			controls.addEventListener('start', onControlsStart);
@@ -555,12 +630,9 @@
 
 		/** Pull camera so the unit sphere fits with starfield visible around it. */
 		const frameGlobe = () => {
-			const vFov = THREE.MathUtils.degToRad(camera.fov);
-			const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-			const fitFov = Math.min(vFov, hFov);
-			const distance = (1 / Math.sin(fitFov / 2)) * 1.2;
+			const distance = framedFitDistance(camera);
 			const dir = camera.position.clone().sub(controls.target);
-			if (dir.lengthSq() < 1e-8) dir.set(0, 0.95, 0.85);
+			if (dir.lengthSq() < 1e-8) dir.copy(STAGE_LOOK);
 			dir.normalize();
 			camera.position.copy(controls.target).addScaledVector(dir, distance);
 			controls.update();
@@ -571,9 +643,16 @@
 			camera,
 			geometry,
 			material,
-			texture,
+			texture: null,
 			controls,
 			globe,
+			earth,
+			isStage,
+			lookDir,
+			userMinDistance,
+			userMaxDistance,
+			introActive: true,
+			autoFrame: false,
 			onControlsStart: isStage ? onControlsStart : undefined,
 			starsGeometry: stars.geometry,
 			starsMaterial: stars.material,
@@ -586,12 +665,14 @@
 		};
 
 		const fit = () => {
+			const res = sceneResources;
+			if (!res) return;
 			const w = el.clientWidth || 1;
 			const h = el.clientHeight || 1;
-			camera.aspect = w / h;
-			camera.updateProjectionMatrix();
+			res.camera.aspect = w / h;
+			res.camera.updateProjectionMatrix();
 			webgl.setSize(w, h, false);
-			if (autoFrame) frameGlobe();
+			if (res.autoFrame && !res.introActive) frameGlobe();
 		};
 		fit();
 		resizeObserver = new ResizeObserver(fit);
@@ -606,9 +687,76 @@
 		};
 		tick();
 
+		loadedVariant = variant;
+	}
+
+	/** Load first texture, reveal earth, zoom from intro distance to framed view. */
+	async function finishIntroWithTexture(
+		url: string,
+		opts: {
+			depolarSquare?: boolean;
+			emptyFillColor?: string;
+			variant?: 'card' | 'stage';
+		} = {}
+	) {
+		const res = sceneResources;
+		if (!res || !renderer) throw new Error('Sphere scene is not ready');
+
+		const seq = ++textureLoadSeq;
+		const texture = await loadTexture(url, opts);
+		if (seq !== textureLoadSeq || !sceneResources || sceneResources !== res) {
+			texture.dispose();
+			return;
+		}
+
+		res.material.map = texture;
+		res.material.color.set(0xffffff);
+		res.material.needsUpdate = true;
+		res.texture = texture;
+		res.earth.visible = true;
+
+		const el = renderer.domElement.parentElement;
+		if (el) {
+			const w = el.clientWidth || 1;
+			const h = el.clientHeight || 1;
+			res.camera.aspect = w / h;
+			res.camera.updateProjectionMatrix();
+			renderer.setSize(w, h, false);
+		}
+
+		const targetDistance = res.isStage
+			? framedFitDistance(res.camera)
+			: CARD_FRAMED_DISTANCE;
+		await animateIntroZoom(
+			res.camera,
+			res.controls,
+			INTRO_DISTANCE,
+			targetDistance,
+			res.lookDir
+		);
+		if (!sceneResources || sceneResources !== res) return;
+
+		res.introActive = false;
+		res.controls.maxDistance = res.userMaxDistance;
+		res.controls.minDistance = res.userMinDistance;
+		res.controls.enabled = true;
+		if (res.isStage) res.autoFrame = true;
+
 		loadedPreviewUrl = url;
-		loadedVariant = isStage ? 'stage' : 'card';
 		statusMessage = '';
+	}
+
+	async function mountGlobe(
+		el: HTMLDivElement,
+		url: string,
+		opts: {
+			depolarSquare?: boolean;
+			emptyFillColor?: string;
+			variant?: 'card' | 'stage';
+		} = {}
+	) {
+		ensureScene(el, opts.variant ?? 'card');
+		await finishIntroWithTexture(url, opts);
 	}
 
 	/**
@@ -624,12 +772,29 @@
 			variant?: 'card' | 'stage';
 		} = {}
 	) {
+		if (mounting) await mounting;
+		if (finishing) await finishing;
+
 		const nextVariant = opts.variant ?? 'card';
 		if (!viewerReady() || loadedVariant !== nextVariant) {
-			await mountGlobe(el, url, opts);
+			const p = mountGlobe(el, url, opts);
+			mounting = p.finally(() => {
+				mounting = null;
+			});
+			await p;
 			return;
 		}
 		if (url === loadedPreviewUrl) return;
+
+		// Starfield waiting for first texture — run intro zoom (not a silent hot-swap).
+		if (!loadedPreviewUrl) {
+			const p = finishIntroWithTexture(url, opts);
+			finishing = p.finally(() => {
+				finishing = null;
+			});
+			await p;
+			return;
+		}
 
 		const seq = ++textureLoadSeq;
 		const view = captureViewState();
@@ -641,14 +806,16 @@
 
 		const prev = sceneResources.texture;
 		sceneResources.material.map = texture;
+		sceneResources.material.color.set(0xffffff);
 		sceneResources.material.needsUpdate = true;
 		sceneResources.texture = texture;
+		sceneResources.earth.visible = true;
 		prev?.dispose();
 		restoreViewState(view);
 		loadedPreviewUrl = url;
 	}
 
-	/** Silent hot-swap when already viewing; overlay only for first mount. */
+	/** Silent hot-swap when already viewing; starfield is the first-mount loading state. */
 	async function showGlobe(
 		el: HTMLDivElement,
 		url: string,
@@ -663,20 +830,20 @@
 			statusMessage = '';
 			return;
 		}
-		if (!hot) statusMessage = 'Loading preview…';
 		try {
 			await applyGlobeTexture(el, url, opts);
 			statusMessage = '';
 		} catch (err) {
-			if (!hot) {
-				disposeViewer();
-				loadedPreviewUrl = '';
-				loadedVariant = '';
+			// Keep starfield if the scene is up; only tear down when there is nothing to show.
+			if (!loadedPreviewUrl) {
+				if (!viewerReady()) {
+					disposeViewer();
+					loadedVariant = '';
+				}
 				statusMessage =
 					err instanceof Error ? err.message : 'Could not open sphere preview.';
 				return;
 			}
-			// Keep the current globe on screen if a background poll fails mid-swap.
 			console.warn('Texture hot-reload failed', err);
 			statusMessage = '';
 		}
@@ -705,7 +872,12 @@
 			emptyFillColor,
 			variant
 		};
-		if (!el || !url) return;
+		if (!el) return;
+
+		if (!url) {
+			ensureScene(el, variant);
+			return;
+		}
 
 		void showGlobe(el, url, mountOpts);
 
@@ -721,14 +893,25 @@
 		loadedVariant = '';
 	});
 
+	/** Wait until first texture intro finishes so archive thumbs aren't empty starfield. */
+	async function waitForIntroReady(timeoutMs = 30_000) {
+		const start = performance.now();
+		while (performance.now() - start < timeoutMs) {
+			if (loadedPreviewUrl && sceneResources && !sceneResources.introActive) return true;
+			await new Promise<void>((r) => requestAnimationFrame(() => r()));
+		}
+		return !!(loadedPreviewUrl && sceneResources && !sceneResources.introActive);
+	}
+
 	/** Snapshot the WebGL canvas for archive gallery thumbs (stage / preserveDrawingBuffer). */
 	export async function captureThumbBlob(
 		type = 'image/jpeg',
 		quality = 0.82
 	): Promise<Blob | null> {
+		const ready = await waitForIntroReady();
 		const webgl = renderer;
 		const resources = sceneResources;
-		if (!webgl || !resources) return null;
+		if (!ready || !webgl || !resources) return null;
 		await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 		webgl.render(resources.scene, resources.camera);
 		return new Promise((resolve) => {

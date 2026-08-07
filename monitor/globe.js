@@ -37,6 +37,13 @@ const MAX_EDGE = 6000;
 const POLL_MS = 60_000;
 /** Earth obliquity — north pole tipped toward the sun (NH summer). */
 const EARTH_AXIAL_TILT_DEG = 23.44;
+/** Far start for first-mount zoom — planet reads as a bright star. */
+const INTRO_DISTANCE = 95;
+const CAMERA_FAR = 280;
+const INTRO_ZOOM_MS = 2400;
+const STAGE_LOOK = new THREE.Vector3(0, 0.95, 0.85);
+const USER_MIN_DISTANCE = 1.05;
+const USER_MAX_DISTANCE = 6;
 
 const container = document.getElementById('globe');
 const statusEl = document.getElementById('status');
@@ -48,6 +55,11 @@ const archiveList = document.getElementById('archive-list');
 
 let renderer = null;
 let animationId = 0;
+let introRaf = 0;
+let introCancel = null;
+/** In-flight first mount / intro; hot-swaps wait on these. */
+let mounting = null;
+let finishing = null;
 let resizeObserver = null;
 let onWindowResize = null;
 let sceneResources = null;
@@ -67,6 +79,58 @@ let lastLiveJob = null;
 let lastArchiveMeta = null;
 /** Ignore stale async texture loads when polls/clicks overlap. */
 let textureLoadSeq = 0;
+
+function easeInOutCubic(t) {
+	return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+function cancelIntroZoom() {
+	if (introRaf) {
+		cancelAnimationFrame(introRaf);
+		introRaf = 0;
+	}
+	if (introCancel) {
+		introCancel();
+		introCancel = null;
+	}
+}
+
+function framedFitDistance(camera) {
+	const vFov = THREE.MathUtils.degToRad(camera.fov);
+	const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+	const fitFov = Math.min(vFov, hFov);
+	return (1 / Math.sin(fitFov / 2)) * 1.2;
+}
+
+/** OrbitControls clamps to maxDistance — raise it for the far intro camera. */
+function animateIntroZoom(camera, controls, fromDist, toDist, lookDir) {
+	cancelIntroZoom();
+	const dir = lookDir.clone().normalize();
+	return new Promise((resolve) => {
+		introCancel = () => resolve();
+		const start = performance.now();
+		const step = (now) => {
+			if (!sceneResources) {
+				introRaf = 0;
+				introCancel = null;
+				resolve();
+				return;
+			}
+			const t = Math.min(1, (now - start) / INTRO_ZOOM_MS);
+			const dist = fromDist + (toDist - fromDist) * easeInOutCubic(t);
+			camera.position.copy(controls.target).addScaledVector(dir, dist);
+			controls.update();
+			if (t < 1) {
+				introRaf = requestAnimationFrame(step);
+				return;
+			}
+			introRaf = 0;
+			introCancel = null;
+			resolve();
+		};
+		introRaf = requestAnimationFrame(step);
+	});
+}
 
 function setStatus(message) {
 	if (!statusEl) return;
@@ -126,7 +190,7 @@ function createStarfield(count = 6000) {
 	const positions = new Float32Array(count * 3);
 	const colors = new Float32Array(count * 3);
 	for (let i = 0; i < count; i++) {
-		const r = 12 + Math.random() * 50;
+		const r = 18 + Math.random() * 200;
 		const theta = Math.random() * Math.PI * 2;
 		const phi = Math.acos(2 * Math.random() - 1);
 		const sinPhi = Math.sin(phi);
@@ -312,6 +376,7 @@ function resolvePreviewUrl(pathOrUrl, { fallback = false } = {}) {
 }
 
 function disposeViewer() {
+	cancelIntroZoom();
 	if (animationId) {
 		cancelAnimationFrame(animationId);
 		animationId = 0;
@@ -329,7 +394,7 @@ function disposeViewer() {
 		sceneResources.controls.dispose();
 		sceneResources.geometry.dispose();
 		sceneResources.material.dispose();
-		sceneResources.texture.dispose();
+		sceneResources.texture?.dispose();
 		sceneResources.starsGeometry?.dispose();
 		sceneResources.starsMaterial?.dispose();
 		sceneResources.sunTexture?.dispose();
@@ -503,84 +568,25 @@ function restoreViewState(state) {
 	controls.update();
 }
 
-/**
- * Swap globe albedo only — keeps camera, orbit target, and spin.
- * Mounts the full scene only on first load (no viewer yet).
- */
-async function applyGlobeTexture(url, opts = {}) {
-	if (!container) throw new Error('Missing #globe container');
-	if (!viewerReady()) {
-		await mountGlobe(container, url, opts);
-		loadedPreviewUrl = url;
-		return;
-	}
-	if (url === loadedPreviewUrl) return;
-
-	const seq = ++textureLoadSeq;
-	const view = captureViewState();
-	const texture = await loadTexture(url, opts);
-	if (seq !== textureLoadSeq || !viewerReady()) {
-		texture.dispose();
-		return;
-	}
-
-	const prev = sceneResources.texture;
-	sceneResources.material.map = texture;
-	sceneResources.material.needsUpdate = true;
-	sceneResources.texture = texture;
-	prev?.dispose();
-	restoreViewState(view);
-	loadedPreviewUrl = url;
-}
-
-/** Show a globe URL: silent hot-swap when already viewing; overlay only for first mount. */
-async function showGlobe(url, opts = {}) {
-	const hot = viewerReady();
-	if (hot && url === loadedPreviewUrl) {
+/** Sync starfield scene at intro distance — no texture load. */
+function ensureScene(el) {
+	if (viewerReady()) {
 		setStatus('');
 		return;
 	}
-	if (!hot) setStatus('Loading preview…');
-	try {
-		await applyGlobeTexture(url, opts);
-		setStatus('');
-	} catch (err) {
-		if (!hot) throw err;
-		// Keep the current globe on screen if a background poll fails mid-swap.
-		console.warn('Texture hot-reload failed', err);
-		setStatus('');
-	}
-}
 
-async function captureGlobeThumbBlob() {
-	if (!sceneResources?.scene || !sceneResources?.camera || !renderer) {
-		throw new Error('Viewer not ready for screenshot');
-	}
-	await waitFrames(3);
-	renderer.render(sceneResources.scene, sceneResources.camera);
-	const canvas = renderer.domElement;
-	const blob = await new Promise((resolve, reject) => {
-		canvas.toBlob(
-			(b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))),
-			'image/jpeg',
-			0.82
-		);
-	});
-	return blob;
-}
-
-async function mountGlobe(el, url, opts = {}) {
 	disposeViewer();
 	el.replaceChildren();
+	setStatus('');
+	loadedPreviewUrl = '';
 
-	const texture = await loadTexture(url, opts);
+	const lookDir = STAGE_LOOK.clone().normalize();
 
 	const scene = new THREE.Scene();
 	scene.background = new THREE.Color(0x000000);
 
-	const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-	// Bias toward north pole (+Y); distance set by frameGlobe().
-	camera.position.set(0, 0.95, 0.85);
+	const camera = new THREE.PerspectiveCamera(40, 1, 0.1, CAMERA_FAR);
+	camera.position.copy(lookDir).multiplyScalar(INTRO_DISTANCE);
 
 	// preserveDrawingBuffer so canvas.toBlob can capture after render.
 	const webgl = new THREE.WebGLRenderer({
@@ -615,7 +621,7 @@ async function mountGlobe(el, url, opts = {}) {
 
 	const geometry = new THREE.SphereGeometry(1, 96, 64);
 	const material = new THREE.MeshStandardMaterial({
-		map: texture,
+		color: 0x0a0a12,
 		roughness: 0.92,
 		metalness: 0
 	});
@@ -623,6 +629,7 @@ async function mountGlobe(el, url, opts = {}) {
 	const atmosphere = createAtmosphere();
 	// Tilted spin axis: north leans toward the sun (summer); daily rotation on local Y.
 	const earth = new THREE.Group();
+	earth.visible = false;
 	applySummerAxialTilt(earth, sunDir);
 	earth.add(globe);
 	earth.add(atmosphere.mesh);
@@ -631,25 +638,23 @@ async function mountGlobe(el, url, opts = {}) {
 	const controls = new OrbitControls(camera, webgl.domElement);
 	controls.enableDamping = true;
 	controls.dampingFactor = 0.06;
-	controls.minDistance = 1.05;
-	controls.maxDistance = 6;
+	controls.minDistance = USER_MIN_DISTANCE;
+	// Raised so OrbitControls.update() does not clamp the far intro camera.
+	controls.maxDistance = INTRO_DISTANCE + 1;
 	controls.target.set(0, 0, 0);
+	controls.enabled = false;
 
-	/** Keep contain-framing on resize until the user orbits / zooms. */
-	let autoFrame = true;
 	const onControlsStart = () => {
-		autoFrame = false;
+		if (sceneResources) sceneResources.autoFrame = false;
 	};
 	controls.addEventListener('start', onControlsStart);
+	controls.update();
 
 	/** Pull camera so the unit sphere fits with starfield visible around it. */
 	const frameGlobe = () => {
-		const vFov = THREE.MathUtils.degToRad(camera.fov);
-		const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-		const fitFov = Math.min(vFov, hFov);
-		const distance = (1 / Math.sin(fitFov / 2)) * 1.2;
+		const distance = framedFitDistance(camera);
 		const dir = camera.position.clone().sub(controls.target);
-		if (dir.lengthSq() < 1e-8) dir.set(0, 0.95, 0.85);
+		if (dir.lengthSq() < 1e-8) dir.copy(STAGE_LOOK);
 		dir.normalize();
 		camera.position.copy(controls.target).addScaledVector(dir, distance);
 		controls.update();
@@ -660,9 +665,13 @@ async function mountGlobe(el, url, opts = {}) {
 		camera,
 		geometry,
 		material,
-		texture,
+		texture: null,
 		controls,
 		globe,
+		earth,
+		lookDir,
+		introActive: true,
+		autoFrame: false,
 		onControlsStart,
 		starsGeometry: stars.geometry,
 		starsMaterial: stars.material,
@@ -675,12 +684,14 @@ async function mountGlobe(el, url, opts = {}) {
 	};
 
 	const fit = () => {
+		const res = sceneResources;
+		if (!res) return;
 		const w = el.clientWidth || window.innerWidth || 1;
 		const h = el.clientHeight || window.innerHeight || 1;
-		camera.aspect = w / h;
-		camera.updateProjectionMatrix();
+		res.camera.aspect = w / h;
+		res.camera.updateProjectionMatrix();
 		webgl.setSize(w, h, true);
-		if (autoFrame) frameGlobe();
+		if (res.autoFrame && !res.introActive) frameGlobe();
 	};
 	fit();
 	onWindowResize = fit;
@@ -696,7 +707,146 @@ async function mountGlobe(el, url, opts = {}) {
 		webgl.render(scene, camera);
 	};
 	tick();
+}
+
+/** Load first texture, reveal earth, zoom from intro distance to framed view. */
+async function finishIntroWithTexture(url, opts = {}) {
+	const res = sceneResources;
+	if (!res || !renderer) throw new Error('Sphere scene is not ready');
+
+	const seq = ++textureLoadSeq;
+	const texture = await loadTexture(url, opts);
+	if (seq !== textureLoadSeq || !sceneResources || sceneResources !== res) {
+		texture.dispose();
+		return;
+	}
+
+	res.material.map = texture;
+	res.material.color.set(0xffffff);
+	res.material.needsUpdate = true;
+	res.texture = texture;
+	res.earth.visible = true;
+
+	const el = renderer.domElement.parentElement;
+	if (el) {
+		const w = el.clientWidth || window.innerWidth || 1;
+		const h = el.clientHeight || window.innerHeight || 1;
+		res.camera.aspect = w / h;
+		res.camera.updateProjectionMatrix();
+		renderer.setSize(w, h, true);
+	}
+
+	const targetDistance = framedFitDistance(res.camera);
+	await animateIntroZoom(res.camera, res.controls, INTRO_DISTANCE, targetDistance, res.lookDir);
+	if (!sceneResources || sceneResources !== res) return;
+
+	res.introActive = false;
+	res.controls.maxDistance = USER_MAX_DISTANCE;
+	res.controls.minDistance = USER_MIN_DISTANCE;
+	res.controls.enabled = true;
+	res.autoFrame = true;
+
 	loadedPreviewUrl = url;
+	setStatus('');
+}
+
+async function mountGlobe(el, url, opts = {}) {
+	ensureScene(el);
+	await finishIntroWithTexture(url, opts);
+}
+
+/**
+ * Swap globe albedo only — keeps camera, orbit target, and spin.
+ * Mounts the full scene only on first load (no viewer yet).
+ */
+async function applyGlobeTexture(url, opts = {}) {
+	if (!container) throw new Error('Missing #globe container');
+	if (mounting) await mounting;
+	if (finishing) await finishing;
+
+	if (!viewerReady()) {
+		const p = mountGlobe(container, url, opts);
+		mounting = p.finally(() => {
+			mounting = null;
+		});
+		await p;
+		return;
+	}
+	if (url === loadedPreviewUrl) return;
+
+	// Starfield waiting for first texture — run intro zoom (not a silent hot-swap).
+	if (!loadedPreviewUrl) {
+		const p = finishIntroWithTexture(url, opts);
+		finishing = p.finally(() => {
+			finishing = null;
+		});
+		await p;
+		return;
+	}
+
+	const seq = ++textureLoadSeq;
+	const view = captureViewState();
+	const texture = await loadTexture(url, opts);
+	if (seq !== textureLoadSeq || !viewerReady()) {
+		texture.dispose();
+		return;
+	}
+
+	const prev = sceneResources.texture;
+	sceneResources.material.map = texture;
+	sceneResources.material.color.set(0xffffff);
+	sceneResources.material.needsUpdate = true;
+	sceneResources.texture = texture;
+	sceneResources.earth.visible = true;
+	prev?.dispose();
+	restoreViewState(view);
+	loadedPreviewUrl = url;
+}
+
+/** Show a globe URL: silent hot-swap when already viewing; starfield is the first-mount loading state. */
+async function showGlobe(url, opts = {}) {
+	const hot = viewerReady();
+	if (hot && url === loadedPreviewUrl) {
+		setStatus('');
+		return;
+	}
+	try {
+		await applyGlobeTexture(url, opts);
+		setStatus('');
+	} catch (err) {
+		if (!loadedPreviewUrl) throw err;
+		// Keep the current globe on screen if a background poll fails mid-swap.
+		console.warn('Texture hot-reload failed', err);
+		setStatus('');
+	}
+}
+
+/** Wait until first texture intro finishes so archive thumbs aren't empty starfield. */
+async function waitForIntroReady(timeoutMs = 30_000) {
+	const start = performance.now();
+	while (performance.now() - start < timeoutMs) {
+		if (loadedPreviewUrl && sceneResources && !sceneResources.introActive) return true;
+		await new Promise((r) => requestAnimationFrame(r));
+	}
+	return !!(loadedPreviewUrl && sceneResources && !sceneResources.introActive);
+}
+
+async function captureGlobeThumbBlob() {
+	const ready = await waitForIntroReady();
+	if (!ready || !sceneResources?.scene || !sceneResources?.camera || !renderer) {
+		throw new Error('Viewer not ready for screenshot');
+	}
+	await waitFrames(3);
+	renderer.render(sceneResources.scene, sceneResources.camera);
+	const canvas = renderer.domElement;
+	const blob = await new Promise((resolve, reject) => {
+		canvas.toBlob(
+			(b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))),
+			'image/jpeg',
+			0.82
+		);
+	});
+	return blob;
 }
 
 async function fetchLatestGlobe() {
@@ -1164,6 +1314,8 @@ function initArchivePane() {
 async function boot() {
 	initFullscreen();
 	initArchivePane();
+	// Starfield immediately — before API fetch / texture decode.
+	if (container) ensureScene(container);
 	await refreshArchiveList();
 	await refreshLive();
 	startPolling();
