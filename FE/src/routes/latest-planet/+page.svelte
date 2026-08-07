@@ -285,7 +285,7 @@
 
 	<aside
 		id="archive-pane"
-		class="absolute top-0 right-0 z-[35] flex h-full w-[min(20rem,85vw)] flex-col border-l border-white/10 bg-stone-950/92 shadow-xl backdrop-blur-md transition-transform duration-200 ease-out {archivePaneOpen
+		class="absolute top-0 right-0 z-[35] flex h-full w-[min(20rem,85vw)] flex-col border-l border-line bg-panel/95 shadow-xl backdrop-blur-md transition-transform duration-200 ease-out {archivePaneOpen
 			? 'translate-x-0 pointer-events-auto'
 			: 'translate-x-full pointer-events-none'}"
 		aria-label="Saved globes"
@@ -294,14 +294,14 @@
 		<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5">
 			<button
 				type="button"
-				class="mb-1.5 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-white/5 {selectedArchive
+				class="mb-1.5 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-panel-muted {selectedArchive
 					? ''
-					: 'bg-white/10 ring-1 ring-white/15'}"
+					: 'bg-panel-muted ring-1 ring-line'}"
 				aria-current={!selectedArchive ? 'true' : 'false'}
 				onclick={() => void selectArchive('')}
 			>
 				<span
-					class="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-md bg-stone-900 text-[0.65rem] text-ink/35"
+					class="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-md bg-canvas text-[0.65rem] text-ink-subtle"
 				>
 					LIVE
 				</span>
@@ -309,16 +309,16 @@
 			</button>
 
 			{#if textureNames.length === 0}
-				<p class="px-2 py-4 text-center text-xs text-ink/40">No saved globes yet</p>
+				<p class="px-2 py-4 text-center text-xs text-ink-subtle">No saved globes yet</p>
 			{:else}
 				<ul class="flex flex-col gap-1">
 					{#each textureNames as name (name)}
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-white/5 {selectedArchive ===
+								class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-panel-muted {selectedArchive ===
 								name
-									? 'bg-white/10 ring-1 ring-white/15'
+									? 'bg-panel-muted ring-1 ring-line'
 									: ''}"
 								aria-current={selectedArchive === name ? 'true' : 'false'}
 								onclick={() => void selectArchive(name)}
@@ -332,7 +332,7 @@
 									/>
 								{:else}
 									<span
-										class="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-md bg-stone-900 text-[0.65rem] text-ink/35"
+										class="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-md bg-canvas text-[0.65rem] text-ink-subtle"
 									>
 										MAP
 									</span>
