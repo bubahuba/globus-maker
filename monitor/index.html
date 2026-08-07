@@ -234,6 +234,17 @@
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
+				text-decoration: none;
+			}
+
+			#place-label[href] {
+				pointer-events: auto;
+				cursor: pointer;
+			}
+
+			#place-label[href]:hover {
+				background: rgba(0, 0, 0, 0.55);
+				text-decoration: underline;
 			}
 
 			#place-label[hidden] {
@@ -429,7 +440,7 @@
 	<body>
 		<div id="globe" aria-label="Globe preview"></div>
 		<p id="status">Loading latest globe…</p>
-		<p id="place-label" hidden></p>
+		<a id="place-label" hidden></a>
 		<div id="controls">
 			<button
 				type="button"
@@ -528,6 +539,6 @@
 				<span class="app-label">Globe Maker</span>
 			</a>
 		</nav>
-		<script type="module" src="./globe.js?v=14"></script>
+		<script type="module" src="./globe.js?v=15"></script>
 	</body>
 </html>

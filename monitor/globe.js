@@ -79,17 +79,39 @@ function setStatus(message) {
 	}
 }
 
-/** Upper-left place chip (matches FE /latest-planet). */
-function setPlaceLabel(label) {
+/** Upper-left place chip (matches FE /latest-planet). Optional job href → Globe Maker `/?job=`. */
+function setPlaceLabel(label, jobHref = '') {
 	if (!placeLabelEl) return;
 	const text = label != null ? String(label).trim() : '';
 	if (!text || text === 'Unavailable') {
 		placeLabelEl.hidden = true;
 		placeLabelEl.textContent = '';
+		placeLabelEl.removeAttribute('href');
+		placeLabelEl.removeAttribute('title');
+		placeLabelEl.removeAttribute('target');
+		placeLabelEl.removeAttribute('rel');
 		return;
 	}
 	placeLabelEl.hidden = false;
 	placeLabelEl.textContent = text;
+	const href = jobHref != null ? String(jobHref).trim() : '';
+	if (href) {
+		placeLabelEl.href = href;
+		placeLabelEl.title = 'Open job';
+		placeLabelEl.target = '_blank';
+		placeLabelEl.rel = 'noopener noreferrer';
+	} else {
+		placeLabelEl.removeAttribute('href');
+		placeLabelEl.removeAttribute('title');
+		placeLabelEl.removeAttribute('target');
+		placeLabelEl.removeAttribute('rel');
+	}
+}
+
+function jobPageUrl(jobId) {
+	const id = jobId != null ? String(jobId).trim() : '';
+	if (!id) return '';
+	return `${API_ORIGIN}/?job=${encodeURIComponent(id)}`;
 }
 
 function parseHex(hex) {
@@ -975,7 +997,7 @@ async function loadArchivedPreview(filename) {
 	const url = archiveUrl(filename);
 	await showGlobe(url, { depolarSquare: false });
 	const label = labelForArchive(filename);
-	setPlaceLabel(label);
+	setPlaceLabel(label); // archive: no full job id
 	document.title = `${label} — Globe Monitor`;
 }
 
@@ -1022,9 +1044,11 @@ async function refreshLive() {
 		// Poll / latest check: hot-swap texture in place (no camera reset, no black overlay).
 		await showGlobe(previewUrl, opts);
 
-		setPlaceLabel(
-			liveDisplayName && liveDisplayName !== 'Unavailable' ? liveDisplayName : ''
-		);
+		const liveLabel =
+			liveDisplayName && liveDisplayName !== 'Unavailable' ? liveDisplayName : '';
+		const liveJobHref =
+			job.fallback !== true && job.id ? jobPageUrl(job.id) : '';
+		setPlaceLabel(liveLabel, liveJobHref);
 		document.title =
 			liveDisplayName && liveDisplayName !== 'Unavailable'
 				? `${liveDisplayName} — Globe Monitor`

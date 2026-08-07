@@ -27,6 +27,7 @@
 
 	let previewUrl = $state<string | null>(null);
 	let placeName = $state<string | null>(null);
+	let liveJobId = $state<string | null>(null);
 	let liveDisplayName = $state('Latest');
 	let fallback = $state(false);
 	let emptyFill = $state('#808080');
@@ -99,6 +100,7 @@
 			if (!nextUrl) throw new Error('No sphere preview URL');
 			previewUrl = nextUrl;
 			placeName = job.placeName?.trim() || null;
+			liveJobId = job.fallback !== true && job.id ? job.id : null;
 			liveDisplayName = placeName || (job.fallback ? 'Unavailable' : 'Globe');
 			fallback = job.fallback === true;
 			emptyFill = job.emptyFillColor || '#808080';
@@ -209,11 +211,21 @@
 			hideFullscreenButton={true}
 		/>
 		{#if placeName && !selectedArchive}
-			<p
-				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
-			>
-				{placeName}
-			</p>
+			{#if liveJobId}
+				<a
+					href={`/?job=${encodeURIComponent(liveJobId)}`}
+					class="absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm transition hover:bg-black/55 hover:underline"
+					title="Open job"
+				>
+					{placeName}
+				</a>
+			{:else}
+				<p
+					class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
+				>
+					{placeName}
+				</p>
+			{/if}
 		{:else if selectedArchive}
 			<p
 				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
