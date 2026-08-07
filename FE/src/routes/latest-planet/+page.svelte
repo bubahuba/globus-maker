@@ -320,9 +320,9 @@
 		<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5">
 			<button
 				type="button"
-				class="mb-1.5 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-panel-muted {selectedArchive
+				class="mb-1.5 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-ink/5 {selectedArchive
 					? ''
-					: 'bg-panel-muted ring-1 ring-line'}"
+					: 'bg-ink/10 ring-2 ring-line-strong'}"
 				aria-current={!selectedArchive ? 'true' : 'false'}
 				onclick={() => void selectArchive('')}
 			>
@@ -342,9 +342,9 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink transition hover:bg-panel-muted {selectedArchive ===
+								class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink transition hover:bg-ink/5 {selectedArchive ===
 								name
-									? 'bg-panel-muted ring-1 ring-line'
+									? 'bg-ink/10 ring-2 ring-line-strong'
 									: ''}"
 								aria-current={selectedArchive === name ? 'true' : 'false'}
 								title={formatArchiveMetaTooltip(archiveMetaByName[name]) ||
