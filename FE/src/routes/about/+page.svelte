@@ -67,6 +67,16 @@
 			slug: 'globe-mode-artistic-room-wide',
 			alt: 'Room washed in colorful projections from an artistic city-map sphere lamp',
 			caption: 'Color wash — tangerine land casting pink and teal light'
+		},
+		{
+			slug: 'globe-mode-diy-stripe-assembly',
+			alt: 'Aerial map stripes being glued onto a papier-mâché globe on a work table',
+			caption: 'DIY assembly — map stripes glued onto a sphere'
+		},
+		{
+			slug: 'globe-mode-diy-clear-coat',
+			alt: 'Person spraying clear coat onto a finished aerial-map globe outdoors',
+			caption: 'Clear coat — sealing the finished sphere'
 		}
 	];
 
