@@ -311,12 +311,12 @@
 			{#if textureNames.length === 0}
 				<p class="px-2 py-4 text-center text-xs text-ink-subtle">No saved globes yet</p>
 			{:else}
-				<ul class="flex flex-col gap-1">
+				<ul class="grid grid-cols-3 gap-1.5">
 					{#each textureNames as name (name)}
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-ink transition hover:bg-panel-muted {selectedArchive ===
+								class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink transition hover:bg-panel-muted {selectedArchive ===
 								name
 									? 'bg-panel-muted ring-1 ring-line'
 									: ''}"
@@ -325,19 +325,21 @@
 							>
 								{#if archivedNames.includes(thumbNameFor(name))}
 									<img
-										class="h-[4.5rem] w-[4.5rem] shrink-0 rounded-md object-cover"
-										src={`${archiveFileUrl(thumbNameFor(name))}?v=1`}
+										class="aspect-square w-full rounded-[22%] object-cover"
+										src={`${archiveFileUrl(thumbNameFor(name))}?v=2`}
 										alt=""
 										loading="lazy"
 									/>
 								{:else}
 									<span
-										class="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-md bg-canvas text-[0.65rem] text-ink-subtle"
+										class="flex aspect-square w-full items-center justify-center rounded-[22%] bg-canvas text-[0.6rem] text-ink-subtle"
 									>
 										MAP
 									</span>
 								{/if}
-								<span class="min-w-0 flex-1 truncate text-sm font-medium">
+								<span
+									class="line-clamp-2 w-full text-center text-[0.65rem] leading-tight font-medium break-words"
+								>
 									{archiveDisplayLabel(name)}
 								</span>
 							</button>

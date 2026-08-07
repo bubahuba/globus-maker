@@ -281,7 +281,7 @@
 				padding: 0.65rem;
 				display: flex;
 				flex-direction: column;
-				gap: 0.5rem;
+				gap: 0.4rem;
 			}
 
 			.archive-item {
@@ -291,9 +291,9 @@
 				gap: 0.65rem;
 				width: 100%;
 				padding: 0.45rem;
-				border: 1px solid rgba(231, 229, 228, 0.12);
+				border: 1px solid transparent;
 				border-radius: 0.65rem;
-				background: rgba(28, 25, 23, 0.55);
+				background: transparent;
 				color: #e7e5e4;
 				font: inherit;
 				text-align: left;
@@ -305,7 +305,7 @@
 			}
 
 			.archive-item[aria-current='true'] {
-				border-color: rgba(231, 229, 228, 0.45);
+				border-color: rgba(231, 229, 228, 0.28);
 				background: rgba(68, 64, 60, 0.75);
 			}
 
@@ -344,6 +344,70 @@
 				line-height: 1.25;
 				overflow: hidden;
 				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.archive-grid {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 0.35rem;
+			}
+
+			.archive-tile {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 0.3rem;
+				width: 100%;
+				padding: 0.35rem 0.2rem 0.4rem;
+				border: 1px solid transparent;
+				border-radius: 0.55rem;
+				background: transparent;
+				color: #e7e5e4;
+				font: inherit;
+				cursor: pointer;
+			}
+
+			.archive-tile:hover {
+				background: rgba(41, 37, 36, 0.85);
+			}
+
+			.archive-tile[aria-current='true'] {
+				border-color: rgba(231, 229, 228, 0.28);
+				background: rgba(68, 64, 60, 0.75);
+			}
+
+			.archive-tile:focus-visible {
+				outline: 2px solid #e7e5e4;
+				outline-offset: 2px;
+			}
+
+			.archive-tile .archive-thumb,
+			.archive-tile .archive-thumb-placeholder {
+				width: 100%;
+				height: auto;
+				aspect-ratio: 1;
+				border-radius: 22%;
+			}
+
+			.archive-tile .archive-thumb-placeholder {
+				font-size: 0.6rem;
+			}
+
+			.archive-tile .archive-name {
+				flex: none;
+				width: 100%;
+				font-size: 0.65rem;
+				font-weight: 500;
+				line-height: 1.15;
+				text-align: center;
+				white-space: normal;
+				overflow: hidden;
+				display: -webkit-box;
+				-webkit-box-orient: vertical;
+				-webkit-line-clamp: 2;
+				line-clamp: 2;
+				overflow-wrap: anywhere;
 			}
 
 			.archive-empty {
@@ -464,6 +528,6 @@
 				<span class="app-label">Globe Maker</span>
 			</a>
 		</nav>
-		<script type="module" src="./globe.js?v=12"></script>
+		<script type="module" src="./globe.js?v=13"></script>
 	</body>
 </html>

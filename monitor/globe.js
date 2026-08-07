@@ -879,10 +879,13 @@ function rebuildArchiveGallery() {
 		return;
 	}
 
+	const grid = document.createElement('div');
+	grid.className = 'archive-grid';
+
 	for (const name of textures) {
 		const btn = document.createElement('button');
 		btn.type = 'button';
-		btn.className = 'archive-item';
+		btn.className = 'archive-tile';
 		btn.dataset.archive = name;
 		btn.setAttribute('aria-current', selectedArchive === name ? 'true' : 'false');
 
@@ -890,7 +893,7 @@ function rebuildArchiveGallery() {
 		if (archivedNames.includes(thumbName)) {
 			const img = document.createElement('img');
 			img.className = 'archive-thumb';
-			img.src = `${archiveUrl(thumbName)}?v=1`;
+			img.src = `${archiveUrl(thumbName)}?v=2`;
 			img.alt = '';
 			img.loading = 'lazy';
 			btn.appendChild(img);
@@ -906,8 +909,10 @@ function rebuildArchiveGallery() {
 		label.textContent = archiveDisplayLabel(name);
 		btn.appendChild(label);
 		btn.addEventListener('click', () => void selectArchive(name));
-		archiveList.appendChild(btn);
+		grid.appendChild(btn);
 	}
+
+	archiveList.appendChild(grid);
 }
 
 async function refreshArchiveList() {
