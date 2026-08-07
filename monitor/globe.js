@@ -889,29 +889,56 @@ function rememberArchived(...names) {
 
 /**
  * After the live globe is on screen: store equirect map + canvas screenshot (-thumb).
+ * If files already exist without GM1 metadata, re-POST with meta from the live job.
  */
 async function archiveLivePreview(filename, sourceUrl, meta = null) {
 	if (!filename || !sourceUrl) return;
 	const thumbName = thumbNameFor(filename);
 	const hasTexture = archivedNames.includes(filename) || (await headExists(filename));
 	const hasThumb = archivedNames.includes(thumbName) || (await headExists(thumbName));
-	if (hasTexture && hasThumb) {
+
+	let needsMeta = false;
+	if (meta && (hasTexture || hasThumb)) {
+		const probe = hasThumb ? thumbName : filename;
+		needsMeta = (await fetchArchiveImageMeta(probe)) == null;
+	}
+
+	if (hasTexture && hasThumb && !needsMeta) {
 		rememberArchived(filename, thumbName);
 		return;
 	}
 
-	if (!hasTexture) {
-		const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
-		if (!imageRes.ok) return;
-		const blob = await imageRes.blob();
-		const ok = await postArchiveBlob(filename, blob, meta);
-		if (!ok) return;
+	if (!hasTexture || needsMeta) {
+		let blob = null;
+		if (!hasTexture) {
+			const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
+			if (imageRes.ok) blob = await imageRes.blob();
+		} else {
+			const existing = await fetch(archiveUrl(filename), { cache: 'no-store' }).catch(() => null);
+			if (existing?.ok) blob = await existing.blob();
+		}
+		if (!blob && !hasTexture) return;
+		if (blob) {
+			const ok = await postArchiveBlob(filename, blob, meta);
+			if (!ok && !hasTexture) return;
+		}
 	}
 
-	if (!hasThumb) {
+	if (!hasThumb || needsMeta) {
 		try {
-			const thumbBlob = await captureGlobeThumbBlob();
-			await postArchiveBlob(thumbName, thumbBlob, meta);
+			let thumbBlob = null;
+			if (!hasThumb) {
+				thumbBlob = await captureGlobeThumbBlob();
+			} else {
+				thumbBlob = (await captureGlobeThumbBlob()) || null;
+				if (!thumbBlob) {
+					const existing = await fetch(archiveUrl(thumbName), { cache: 'no-store' }).catch(
+						() => null
+					);
+					if (existing?.ok) thumbBlob = await existing.blob();
+				}
+			}
+			if (thumbBlob) await postArchiveBlob(thumbName, thumbBlob, meta);
 		} catch (err) {
 			console.warn('Could not capture globe thumb', err);
 		}

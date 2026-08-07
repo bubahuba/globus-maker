@@ -8,6 +8,7 @@ import {
 	archiveMetaFromJob,
 	archiveMetaQuery,
 	formatArchiveMetaTooltip,
+	injectArchiveImageMeta,
 	parseArchiveImageMeta,
 	type ArchiveImageMeta
 } from '@shared/archive-image-meta';
@@ -93,12 +94,21 @@ export async function saveArchivedPreview(
 	blob: Blob,
 	meta?: ArchiveImageMeta | null
 ): Promise<boolean> {
+	let body: Blob = blob;
+	if (meta) {
+		try {
+			const injected = injectArchiveImageMeta(await blob.arrayBuffer(), meta);
+			body = new Blob([Uint8Array.from(injected)], { type: 'image/jpeg' });
+		} catch {
+			body = blob;
+		}
+	}
 	const response = await fetch(
 		`/api/globe-preview/save?name=${encodeURIComponent(filename)}${archiveMetaQuery(meta)}`,
 		{
 			method: 'POST',
-			body: blob,
-			headers: { 'Content-Type': blob.type || 'image/jpeg' }
+			body,
+			headers: { 'Content-Type': 'image/jpeg' }
 		}
 	);
 	return response.ok || response.status === 201 || response.status === 204;
@@ -139,9 +149,20 @@ export async function loadArchiveMetaMap(
 	return out;
 }
 
+async function fetchArchivedBlob(filename: string): Promise<Blob | null> {
+	try {
+		const response = await fetch(archiveFileUrl(filename), { cache: 'no-store' });
+		if (!response.ok) return null;
+		return await response.blob();
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Persist equirect texture (+ optional canvas thumb) via monitor PHP save API.
- * Skips work when both files already exist.
+ * Skips when both files exist and already carry GM1 metadata (or no meta to write).
+ * If the monitor archived first without meta, re-POSTs with meta from the latest-globe job.
  */
 export async function archiveLivePreview(opts: {
 	filename: string;
@@ -158,24 +179,44 @@ export async function archiveLivePreview(opts: {
 	const hasTexture = names.has(filename) || (await headExists(filename));
 	const hasThumb = names.has(thumbName) || (await headExists(thumbName));
 
-	if (hasTexture && hasThumb) {
+	let needsMeta = false;
+	if (meta && (hasTexture || hasThumb)) {
+		const probe = hasThumb ? thumbName : filename;
+		needsMeta = (await fetchArchiveImageMeta(probe)) == null;
+	}
+
+	if (hasTexture && hasThumb && !needsMeta) {
 		names.add(filename);
 		names.add(thumbName);
 		return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 	}
 
-	if (!hasTexture) {
-		const imageRes = await fetch(sourceUrl, { cache: 'no-store' });
-		if (!imageRes.ok) return [...names];
-		const blob = await imageRes.blob();
-		const ok = await saveArchivedPreview(filename, blob, meta);
-		if (!ok) return [...names];
+	if (!hasTexture || needsMeta) {
+		let blob: Blob | null = null;
+		if (!hasTexture) {
+			const imageRes = await fetch(sourceUrl, { cache: 'no-store' });
+			if (imageRes.ok) blob = await imageRes.blob();
+		} else {
+			blob = await fetchArchivedBlob(filename);
+		}
+		if (!blob && !hasTexture) return [...names];
+		if (blob) {
+			const ok = await saveArchivedPreview(filename, blob, meta);
+			if (!ok && !hasTexture) return [...names];
+			if (ok) names.add(filename);
+		}
+	} else {
 		names.add(filename);
 	}
 
-	if (!hasThumb) {
+	if (!hasThumb || needsMeta) {
 		try {
-			const thumbBlob = await captureThumb();
+			let thumbBlob: Blob | null = null;
+			if (!hasThumb) {
+				thumbBlob = await captureThumb();
+			} else {
+				thumbBlob = (await captureThumb()) || (await fetchArchivedBlob(thumbName));
+			}
 			if (thumbBlob) {
 				const ok = await saveArchivedPreview(thumbName, thumbBlob, meta);
 				if (ok) names.add(thumbName);
@@ -183,6 +224,8 @@ export async function archiveLivePreview(opts: {
 		} catch (err) {
 			console.warn('Could not capture globe thumb', err);
 		}
+	} else {
+		names.add(thumbName);
 	}
 
 	return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));

@@ -63,6 +63,9 @@ if (strlen($body) > 32 * 1024 * 1024) {
 	exit;
 }
 
+// Capture GM1: COM from the upload before GD strips it (FE may embed meta in the JPEG).
+$bodyMeta = gm_parse_gm1_from_jpeg($body);
+
 $src = @imagecreatefromstring($body);
 if ($src === false) {
 	http_response_code(400);
@@ -126,6 +129,9 @@ if ($ok === false || !is_file($path) || filesize($path) < 32) {
 }
 
 $meta = gm_archive_meta_from_query($_GET);
+if ($meta === null) {
+	$meta = $bodyMeta;
+}
 if ($meta !== null) {
 	gm_inject_jpeg_com_meta($path, $meta);
 }
@@ -134,6 +140,62 @@ http_response_code($existed ? 204 : 201);
 header('Content-Type: text/plain; charset=utf-8');
 header('X-Archive-Name: ' . $outName);
 echo $existed ? 'Updated' : 'Created';
+
+/**
+ * Read first GM1: JPEG COM payload from raw bytes (before GD).
+ *
+ * @return array<string, mixed>|null
+ */
+function gm_parse_gm1_from_jpeg($bytes) {
+	$len = strlen($bytes);
+	if ($len < 4 || $bytes[0] !== "\xFF" || $bytes[1] !== "\xD8") {
+		return null;
+	}
+	$i = 2;
+	while ($i + 3 < $len) {
+		if ($bytes[$i] !== "\xFF") {
+			$i += 1;
+			continue;
+		}
+		$marker = ord($bytes[$i + 1]);
+		if ($marker === 0xD9 || $marker === 0xDA) {
+			break;
+		}
+		if ($marker === 0x00 || $marker === 0xFF) {
+			$i += 1;
+			continue;
+		}
+		if ($marker >= 0xD0 && $marker <= 0xD7) {
+			$i += 2;
+			continue;
+		}
+		if ($i + 3 >= $len) {
+			break;
+		}
+		$segLen = (ord($bytes[$i + 2]) << 8) | ord($bytes[$i + 3]);
+		if ($segLen < 2 || $i + 2 + $segLen > $len) {
+			break;
+		}
+		if ($marker === 0xFE) {
+			$text = substr($bytes, $i + 4, $segLen - 2);
+			$text = rtrim($text, "\0");
+			if (strpos(ltrim($text), GM_META_PREFIX) === 0) {
+				$json = substr(ltrim($text), strlen(GM_META_PREFIX));
+				$data = json_decode($json, true);
+				if (is_array($data) && count($data) > 0) {
+					return gm_archive_meta_from_query(array(
+						'placeName' => isset($data['placeName']) ? (string) $data['placeName'] : '',
+						'lat' => isset($data['lat']) ? (string) $data['lat'] : '',
+						'lng' => isset($data['lng']) ? (string) $data['lng'] : '',
+						'sideMeters' => isset($data['sideMeters']) ? (string) $data['sideMeters'] : '',
+					));
+				}
+			}
+		}
+		$i += 2 + $segLen;
+	}
+	return null;
+}
 
 /**
  * @param array<string, mixed> $query
