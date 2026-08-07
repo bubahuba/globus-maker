@@ -15,9 +15,12 @@
 	const INTRO_DISTANCE = 95;
 	const CAMERA_FAR = 280;
 	const INTRO_ZOOM_MS = 2400;
+	const FOCUS_FLY_MS = 2200;
+	const MIN_PLANET_SEPARATION = 28;
 	const CARD_LOOK = new THREE.Vector3(0, 0.35, 2.6);
 	const STAGE_LOOK = new THREE.Vector3(0, 0.95, 0.85);
 	const CARD_FRAMED_DISTANCE = CARD_LOOK.length();
+	const CARD_PLANET_ID = 'card';
 
 	interface Props {
 		/** URL of stripe panorama preview JPEG (query string ignored for reload). */
@@ -32,6 +35,8 @@
 		controlsOffsetRight?: string;
 		/** Hide the built-in fullscreen button (parent chrome owns it). */
 		hideFullscreenButton?: boolean;
+		/** Stage: fired when the user clicks a planet in the scene (id is `'live'` or archive filename). */
+		onPlanetFocus?: (id: string) => void;
 	}
 
 	let {
@@ -41,8 +46,47 @@
 		depolarSquare = false,
 		emptyFillColor = '#808080',
 		controlsOffsetRight = '0.75rem',
-		hideFullscreenButton = false
+		hideFullscreenButton = false,
+		onPlanetFocus
 	}: Props = $props();
+
+	type TextureOpts = { depolarSquare?: boolean; emptyFillColor?: string };
+
+	type PlanetEntry = {
+		id: string;
+		earth: THREE.Group;
+		globe: THREE.Mesh;
+		material: THREE.MeshStandardMaterial;
+		geometry: THREE.BufferGeometry;
+		texture: THREE.Texture | null;
+		atmosphereGeometry: THREE.BufferGeometry;
+		atmosphereMaterial: THREE.Material;
+		loadSeq: number;
+		loadedUrl: string;
+	};
+
+	type SceneResources = {
+		scene: THREE.Scene;
+		camera: THREE.PerspectiveCamera;
+		controls: OrbitControls;
+		isStage: boolean;
+		lookDir: THREE.Vector3;
+		userMinDistance: number;
+		userMaxDistance: number;
+		introActive: boolean;
+		autoFrame: boolean;
+		onControlsStart?: () => void;
+		starsGeometry: THREE.BufferGeometry;
+		starsMaterial: THREE.Material;
+		sunTexture: THREE.Texture;
+		sunMaterial: THREE.Material;
+		lensflare: Lensflare;
+		lensflareTextures: THREE.Texture[];
+		planets: Map<string, PlanetEntry>;
+		focusedId: string | null;
+		/** True after the first planet has completed its far starfield intro. */
+		hadFirstIntro: boolean;
+	};
 
 	let shellEl: HTMLDivElement | undefined = $state();
 	let container: HTMLDivElement | undefined = $state();
@@ -68,46 +112,41 @@
 		}
 	}
 
-	let loadedPreviewUrl = '';
 	let loadedVariant: 'card' | 'stage' | '' = '';
-	/** Ignore stale async texture loads when polls/clicks overlap. */
-	let textureLoadSeq = 0;
+	/** In-flight first mount / intro; hot-swaps wait on these. */
+	let mounting: Promise<void> | null = null;
+	let finishing: Promise<void> | null = null;
+	let focusFlight: Promise<void> | null = null;
+	let resizeObserver: ResizeObserver | null = null;
 	let renderer: THREE.WebGLRenderer | null = null;
 	let animationId = 0;
 	let introRaf = 0;
 	let introCancel: (() => void) | null = null;
-	/** In-flight first mount / intro; hot-swaps wait on these. */
-	let mounting: Promise<void> | null = null;
-	let finishing: Promise<void> | null = null;
-	let resizeObserver: ResizeObserver | null = null;
-	let sceneResources: {
-		scene: THREE.Scene;
-		camera: THREE.PerspectiveCamera;
-		geometry: THREE.BufferGeometry;
-		material: THREE.MeshStandardMaterial;
-		texture: THREE.Texture | null;
-		controls: OrbitControls;
-		globe: THREE.Object3D;
-		earth: THREE.Object3D;
-		isStage: boolean;
-		lookDir: THREE.Vector3;
-		userMinDistance: number;
-		userMaxDistance: number;
-		introActive: boolean;
-		autoFrame: boolean;
-		onControlsStart?: () => void;
-		starsGeometry: THREE.BufferGeometry;
-		starsMaterial: THREE.Material;
-		sunTexture: THREE.Texture;
-		sunMaterial: THREE.Material;
-		lensflare: Lensflare;
-		lensflareTextures: THREE.Texture[];
-		atmosphereGeometry: THREE.BufferGeometry;
-		atmosphereMaterial: THREE.Material;
-	} | null = null;
+	let sceneResources: SceneResources | null = null;
+	const raycaster = new THREE.Raycaster();
+	const pointerNdc = new THREE.Vector2();
+	let pointerDown: { x: number; y: number; t: number } | null = null;
+	let onCanvasPointerDown: ((e: PointerEvent) => void) | null = null;
+	let onCanvasPointerUp: ((e: PointerEvent) => void) | null = null;
 
 	function easeInOutCubic(t: number) {
 		return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+	}
+
+	/** Quadratic Bezier through a → b → c. */
+	function bezier3(
+		a: THREE.Vector3,
+		b: THREE.Vector3,
+		c: THREE.Vector3,
+		t: number,
+		out: THREE.Vector3
+	) {
+		const u = 1 - t;
+		return out
+			.copy(a)
+			.multiplyScalar(u * u)
+			.addScaledVector(b, 2 * u * t)
+			.addScaledVector(c, t * t);
 	}
 
 	function cancelIntroZoom() {
@@ -128,66 +167,17 @@
 		return (1 / Math.sin(fitFov / 2)) * 1.2;
 	}
 
-	/** OrbitControls clamps to maxDistance — raise it for the far intro camera. */
-	function animateIntroZoom(
-		camera: THREE.PerspectiveCamera,
-		controls: OrbitControls,
-		fromDist: number,
-		toDist: number,
-		lookDir: THREE.Vector3
-	): Promise<void> {
-		cancelIntroZoom();
-		const dir = lookDir.clone().normalize();
-		return new Promise((resolve) => {
-			introCancel = () => resolve();
-			const start = performance.now();
-			const step = (now: number) => {
-				if (!sceneResources) {
-					introRaf = 0;
-					introCancel = null;
-					resolve();
-					return;
-				}
-				const t = Math.min(1, (now - start) / INTRO_ZOOM_MS);
-				const dist = fromDist + (toDist - fromDist) * easeInOutCubic(t);
-				camera.position.copy(controls.target).addScaledVector(dir, dist);
-				controls.update();
-				if (t < 1) {
-					introRaf = requestAnimationFrame(step);
-					return;
-				}
-				introRaf = 0;
-				introCancel = null;
-				resolve();
-			};
-			introRaf = requestAnimationFrame(step);
-		});
+	function targetFramedDistance(res: SceneResources) {
+		return res.isStage ? framedFitDistance(res.camera) : CARD_FRAMED_DISTANCE;
 	}
 
+	/** Scene + controls exist (starfield alone is fine). */
 	function viewerReady(): boolean {
-		return !!(renderer && sceneResources?.material && sceneResources?.globe && sceneResources?.controls);
+		return !!(renderer && sceneResources?.controls && sceneResources?.camera);
 	}
 
-	/** Snapshot view so a texture swap never drifts camera / spin. */
-	function captureViewState() {
-		if (!viewerReady() || !sceneResources) return null;
-		const { camera, controls, globe } = sceneResources;
-		return {
-			cameraPos: camera.position.clone(),
-			target: controls.target.clone(),
-			spinY: globe.rotation.y
-		};
-	}
-
-	function restoreViewState(
-		state: { cameraPos: THREE.Vector3; target: THREE.Vector3; spinY: number } | null
-	) {
-		if (!state || !viewerReady() || !sceneResources) return;
-		const { camera, controls, globe } = sceneResources;
-		camera.position.copy(state.cameraPos);
-		controls.target.copy(state.target);
-		globe.rotation.y = state.spinY;
-		controls.update();
+	function getPlanet(id: string): PlanetEntry | undefined {
+		return sceneResources?.planets.get(id);
 	}
 
 	function parseHex(hex: string): { r: number; g: number; b: number } | null {
@@ -474,8 +464,46 @@
 		return { lensflare, textures: [glow, disc, ring] };
 	}
 
+	function pickPlanetPosition(planets: Map<string, PlanetEntry>, id: string): THREE.Vector3 {
+		if (id === 'live' || planets.size === 0) {
+			return new THREE.Vector3(0, 0, 0);
+		}
+		for (let radius = 32; radius <= 200; radius += 8) {
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const dir = new THREE.Vector3(
+					Math.random() * 2 - 1,
+					Math.random() * 2 - 1,
+					Math.random() * 2 - 1
+				);
+				if (dir.lengthSq() < 1e-8) continue;
+				dir.normalize().multiplyScalar(radius);
+				let ok = true;
+				for (const p of planets.values()) {
+					if (p.earth.position.distanceTo(dir) < MIN_PLANET_SEPARATION) {
+						ok = false;
+						break;
+					}
+				}
+				if (ok) return dir;
+			}
+		}
+		const axis = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+		if (axis.lengthSq() < 1e-8) axis.set(1, 0, 0);
+		return axis.normalize().multiplyScalar(80);
+	}
+
+	function disposePlanet(planet: PlanetEntry) {
+		planet.earth.removeFromParent();
+		planet.geometry.dispose();
+		planet.material.dispose();
+		planet.texture?.dispose();
+		planet.atmosphereGeometry.dispose();
+		planet.atmosphereMaterial.dispose();
+	}
+
 	function disposeViewer() {
 		cancelIntroZoom();
+		detachPlanetClickHandlers();
 		if (animationId) {
 			cancelAnimationFrame(animationId);
 			animationId = 0;
@@ -487,17 +515,16 @@
 				sceneResources.controls.removeEventListener('start', sceneResources.onControlsStart);
 			}
 			sceneResources.controls.dispose();
-			sceneResources.geometry.dispose();
-			sceneResources.material.dispose();
-			sceneResources.texture?.dispose();
+			for (const planet of sceneResources.planets.values()) {
+				disposePlanet(planet);
+			}
+			sceneResources.planets.clear();
 			sceneResources.starsGeometry.dispose();
 			sceneResources.starsMaterial.dispose();
 			sceneResources.sunTexture.dispose();
 			sceneResources.sunMaterial.dispose();
 			sceneResources.lensflare.dispose();
 			for (const tex of sceneResources.lensflareTextures) tex.dispose();
-			sceneResources.atmosphereGeometry.dispose();
-			sceneResources.atmosphereMaterial.dispose();
 			sceneResources = null;
 		}
 		if (renderer) {
@@ -507,10 +534,7 @@
 		}
 	}
 
-	async function loadTexture(
-		url: string,
-		opts: { depolarSquare?: boolean; emptyFillColor?: string } = {}
-	): Promise<THREE.CanvasTexture> {
+	async function loadTexture(url: string, opts: TextureOpts = {}): Promise<THREE.CanvasTexture> {
 		const img = new Image();
 		img.decoding = 'async';
 		img.src = url;
@@ -542,9 +566,298 @@
 		return texture;
 	}
 
-	/** Sync starfield scene at intro distance — no texture load. */
-	function ensureScene(el: HTMLDivElement, variant: 'card' | 'stage' = 'card') {
-		if (viewerReady() && loadedVariant === variant) {
+	function createPlanetEntry(id: string, position: THREE.Vector3): PlanetEntry {
+		const res = sceneResources;
+		if (!res) throw new Error('Sphere scene is not ready');
+
+		const geometry = new THREE.SphereGeometry(1, 96, 64);
+		const material = new THREE.MeshStandardMaterial({
+			color: 0x0a0a12,
+			roughness: 0.92,
+			metalness: 0
+		});
+		const globe = new THREE.Mesh(geometry, material);
+		globe.userData.planetId = id;
+		const atmosphere = createAtmosphere();
+		atmosphere.mesh.userData.planetId = id;
+		const earth = new THREE.Group();
+		earth.visible = false;
+		earth.position.copy(position);
+		applySummerAxialTilt(earth, SUN_DIR);
+		earth.add(globe);
+		earth.add(atmosphere.mesh);
+		res.scene.add(earth);
+
+		const entry: PlanetEntry = {
+			id,
+			earth,
+			globe,
+			material,
+			geometry,
+			texture: null,
+			atmosphereGeometry: atmosphere.geometry,
+			atmosphereMaterial: atmosphere.material,
+			loadSeq: 0,
+			loadedUrl: ''
+		};
+		res.planets.set(id, entry);
+		return entry;
+	}
+
+	function detachPlanetClickHandlers() {
+		const canvas = renderer?.domElement;
+		if (canvas && onCanvasPointerDown) {
+			canvas.removeEventListener('pointerdown', onCanvasPointerDown);
+		}
+		if (canvas && onCanvasPointerUp) {
+			canvas.removeEventListener('pointerup', onCanvasPointerUp);
+		}
+		onCanvasPointerDown = null;
+		onCanvasPointerUp = null;
+		pointerDown = null;
+	}
+
+	/** Stage only: click a distant planet (not a drag) → same as sidebar focus. */
+	function attachPlanetClickHandlers(canvas: HTMLCanvasElement) {
+		detachPlanetClickHandlers();
+		onCanvasPointerDown = (event: PointerEvent) => {
+			if (event.button !== 0) return;
+			pointerDown = { x: event.clientX, y: event.clientY, t: performance.now() };
+		};
+		onCanvasPointerUp = (event: PointerEvent) => {
+			const down = pointerDown;
+			pointerDown = null;
+			if (!down || event.button !== 0) return;
+			const res = sceneResources;
+			if (!res?.isStage || res.introActive || !res.controls.enabled) return;
+			const dx = event.clientX - down.x;
+			const dy = event.clientY - down.y;
+			if (dx * dx + dy * dy > 36) return; // drag — leave to OrbitControls
+			if (performance.now() - down.t > 500) return;
+
+			const rect = canvas.getBoundingClientRect();
+			if (rect.width < 1 || rect.height < 1) return;
+			pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+			pointerNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+			raycaster.setFromCamera(pointerNdc, res.camera);
+
+			const targets: THREE.Object3D[] = [];
+			for (const planet of res.planets.values()) {
+				if (!planet.earth.visible || !planet.texture) continue;
+				targets.push(planet.globe);
+				for (const child of planet.earth.children) {
+					if (child !== planet.globe) targets.push(child);
+				}
+			}
+			const hits = raycaster.intersectObjects(targets, false);
+			const hitId = hits[0]?.object?.userData?.planetId;
+			if (typeof hitId !== 'string' || !hitId) return;
+			if (hitId === res.focusedId) return;
+			const planet = res.planets.get(hitId);
+			if (!planet?.loadedUrl) return;
+			// Parent drives focus (same path as sidebar thumbnails).
+			onPlanetFocus?.(hitId);
+		};
+		canvas.addEventListener('pointerdown', onCanvasPointerDown);
+		canvas.addEventListener('pointerup', onCanvasPointerUp);
+	}
+
+	async function applyTextureToPlanet(
+		planet: PlanetEntry,
+		url: string,
+		opts: TextureOpts = {}
+	): Promise<boolean> {
+		const seq = ++planet.loadSeq;
+		const texture = await loadTexture(url, opts);
+		if (seq !== planet.loadSeq || !sceneResources?.planets.has(planet.id)) {
+			texture.dispose();
+			return false;
+		}
+		const prev = planet.texture;
+		planet.material.map = texture;
+		planet.material.color.set(0xffffff);
+		planet.material.needsUpdate = true;
+		planet.texture = texture;
+		planet.earth.visible = true;
+		planet.loadedUrl = url;
+		prev?.dispose();
+		return true;
+	}
+
+	/** Snapshot view so a texture swap never drifts camera / spin. */
+	function captureViewState(planet: PlanetEntry) {
+		if (!viewerReady() || !sceneResources) return null;
+		const { camera, controls } = sceneResources;
+		return {
+			cameraPos: camera.position.clone(),
+			target: controls.target.clone(),
+			spinY: planet.globe.rotation.y
+		};
+	}
+
+	function restoreViewState(
+		planet: PlanetEntry,
+		state: { cameraPos: THREE.Vector3; target: THREE.Vector3; spinY: number } | null
+	) {
+		if (!state || !viewerReady() || !sceneResources) return;
+		const { camera, controls } = sceneResources;
+		camera.position.copy(state.cameraPos);
+		controls.target.copy(state.target);
+		planet.globe.rotation.y = state.spinY;
+		controls.update();
+	}
+
+	function syncCameraAspect() {
+		const res = sceneResources;
+		const webgl = renderer;
+		if (!res || !webgl) return;
+		const el = webgl.domElement.parentElement;
+		if (!el) return;
+		const w = el.clientWidth || 1;
+		const h = el.clientHeight || 1;
+		res.camera.aspect = w / h;
+		res.camera.updateProjectionMatrix();
+		webgl.setSize(w, h, false);
+	}
+
+	function frameFocusedPlanet() {
+		const res = sceneResources;
+		if (!res || !res.focusedId) return;
+		const planet = res.planets.get(res.focusedId);
+		if (!planet) return;
+		const distance = targetFramedDistance(res);
+		const dir = res.camera.position.clone().sub(res.controls.target);
+		if (dir.lengthSq() < 1e-8) dir.copy(res.lookDir);
+		dir.normalize();
+		res.controls.target.copy(planet.earth.position);
+		res.camera.position.copy(res.controls.target).addScaledVector(dir, distance);
+		res.controls.update();
+	}
+
+	/**
+	 * Animate controls.target + camera.position to frame a planet.
+	 * Inter-planet flights approach from the current viewpoint (keeps destination on screen)
+	 * via a pull-back Bezier arc; intro zoom keeps the far starfield path.
+	 */
+	function animateCameraToPlanet(
+		planet: PlanetEntry,
+		opts: { fromIntroDistance?: boolean; durationMs: number }
+	): Promise<void> {
+		cancelIntroZoom();
+		const res = sceneResources;
+		if (!res) return Promise.resolve();
+
+		const { camera, controls, lookDir } = res;
+		const endTarget = planet.earth.position.clone();
+		const framedDist = targetFramedDistance(res);
+		const fallbackDir = lookDir.clone().normalize();
+
+		let startTarget: THREE.Vector3;
+		let startCam: THREE.Vector3;
+		let midCam: THREE.Vector3;
+		let endCam: THREE.Vector3;
+		const cinematic = !opts.fromIntroDistance;
+
+		if (opts.fromIntroDistance) {
+			startTarget = endTarget.clone();
+			startCam = endTarget.clone().addScaledVector(fallbackDir, INTRO_DISTANCE);
+			camera.position.copy(startCam);
+			controls.target.copy(startTarget);
+			endCam = endTarget.clone().addScaledVector(fallbackDir, framedDist);
+			midCam = startCam.clone().lerp(endCam, 0.5);
+		} else {
+			startTarget = controls.target.clone();
+			startCam = camera.position.clone();
+			// Approach from where we already see the destination — don't flip to STAGE_LOOK.
+			const approachDir = startCam.clone().sub(endTarget);
+			if (approachDir.lengthSq() < 1e-8) approachDir.copy(fallbackDir);
+			else approachDir.normalize();
+			endCam = endTarget.clone().addScaledVector(approachDir, framedDist);
+
+			// Gentle arc (light pull-back) so travel is one continuous motion, not pull-then-dive.
+			const span = Math.max(startCam.distanceTo(endCam), startCam.distanceTo(endTarget));
+			const pullBack = THREE.MathUtils.clamp(span * 0.18, 2, 14);
+			midCam = startCam.clone().lerp(endCam, 0.5).addScaledVector(approachDir, pullBack);
+			midCam.y += pullBack * 0.12;
+		}
+
+		const maxNeeded =
+			Math.max(
+				startCam.distanceTo(endTarget),
+				midCam.distanceTo(endTarget),
+				endCam.distanceTo(endTarget),
+				startCam.distanceTo(startTarget),
+				INTRO_DISTANCE
+			) + 1;
+		controls.maxDistance = Math.max(controls.maxDistance, maxNeeded);
+		controls.enabled = false;
+		res.introActive = true;
+
+		const camOut = new THREE.Vector3();
+		return new Promise((resolve) => {
+			introCancel = () => resolve();
+			const start = performance.now();
+			const step = (now: number) => {
+				if (!sceneResources || sceneResources !== res) {
+					introRaf = 0;
+					introCancel = null;
+					resolve();
+					return;
+				}
+				const t = Math.min(1, (now - start) / opts.durationMs);
+				// One shared ease: look and camera travel together (look leads only slightly).
+				const e = easeInOutCubic(t);
+				const lookT = cinematic ? easeInOutCubic(Math.min(1, t * 1.08)) : e;
+				controls.target.lerpVectors(startTarget, endTarget, lookT);
+				if (cinematic) {
+					bezier3(startCam, midCam, endCam, e, camOut);
+					camera.position.copy(camOut);
+				} else {
+					camera.position.lerpVectors(startCam, endCam, e);
+				}
+				controls.update();
+				if (t < 1) {
+					introRaf = requestAnimationFrame(step);
+					return;
+				}
+				introRaf = 0;
+				introCancel = null;
+				resolve();
+			};
+			introRaf = requestAnimationFrame(step);
+		});
+	}
+
+	async function finishFocusOnPlanet(planet: PlanetEntry, fromIntro: boolean) {
+		const res = sceneResources;
+		if (!res) return;
+
+		syncCameraAspect();
+		const durationMs = fromIntro ? INTRO_ZOOM_MS : FOCUS_FLY_MS;
+		const p = animateCameraToPlanet(planet, {
+			fromIntroDistance: fromIntro,
+			durationMs
+		});
+		focusFlight = p.finally(() => {
+			focusFlight = null;
+		});
+		await p;
+		if (!sceneResources || sceneResources !== res || !res.planets.has(planet.id)) return;
+
+		res.introActive = false;
+		res.hadFirstIntro = true;
+		res.focusedId = planet.id;
+		res.controls.target.copy(planet.earth.position);
+		res.controls.maxDistance = res.userMaxDistance;
+		res.controls.minDistance = res.userMinDistance;
+		res.controls.enabled = true;
+		if (res.isStage) res.autoFrame = true;
+		statusMessage = '';
+	}
+
+	/** Sync starfield scene at intro distance — no texture load / no planets. */
+	function ensureScene(el: HTMLDivElement, nextVariant: 'card' | 'stage' = 'card') {
+		if (viewerReady() && loadedVariant === nextVariant) {
 			statusMessage = '';
 			return;
 		}
@@ -552,9 +865,8 @@
 		disposeViewer();
 		el.replaceChildren();
 		statusMessage = '';
-		loadedPreviewUrl = '';
 
-		const isStage = variant === 'stage';
+		const isStage = nextVariant === 'stage';
 		const lookDir = (isStage ? STAGE_LOOK : CARD_LOOK).clone().normalize();
 		const userMinDistance = isStage ? 1.05 : 1.35;
 		const userMaxDistance = isStage ? 6 : 5;
@@ -594,23 +906,6 @@
 		nightFill.position.set(-3.5, -0.4, -2.2);
 		nextScene.add(nightFill);
 
-		// DePolar panorama: top = map centre (north pole), bottom = rim / south.
-		const geometry = new THREE.SphereGeometry(1, 96, 64);
-		const material = new THREE.MeshStandardMaterial({
-			color: 0x0a0a12,
-			roughness: 0.92,
-			metalness: 0
-		});
-		const globe = new THREE.Mesh(geometry, material);
-		const atmosphere = createAtmosphere();
-		// Tilted spin axis: north leans toward the sun (summer); daily rotation on local Y.
-		const earth = new THREE.Group();
-		earth.visible = false;
-		applySummerAxialTilt(earth, SUN_DIR);
-		earth.add(globe);
-		earth.add(atmosphere.mesh);
-		nextScene.add(earth);
-
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.06;
@@ -628,25 +923,10 @@
 		}
 		controls.update();
 
-		/** Pull camera so the unit sphere fits with starfield visible around it. */
-		const frameGlobe = () => {
-			const distance = framedFitDistance(camera);
-			const dir = camera.position.clone().sub(controls.target);
-			if (dir.lengthSq() < 1e-8) dir.copy(STAGE_LOOK);
-			dir.normalize();
-			camera.position.copy(controls.target).addScaledVector(dir, distance);
-			controls.update();
-		};
-
 		sceneResources = {
 			scene: nextScene,
 			camera,
-			geometry,
-			material,
-			texture: null,
 			controls,
-			globe,
-			earth,
 			isStage,
 			lookDir,
 			userMinDistance,
@@ -660,8 +940,9 @@
 			sunMaterial: sun.material,
 			lensflare: flare.lensflare,
 			lensflareTextures: flare.textures,
-			atmosphereGeometry: atmosphere.geometry,
-			atmosphereMaterial: atmosphere.material
+			planets: new Map(),
+			focusedId: null,
+			hadFirstIntro: false
 		};
 
 		const fit = () => {
@@ -672,7 +953,7 @@
 			res.camera.aspect = w / h;
 			res.camera.updateProjectionMatrix();
 			webgl.setSize(w, h, false);
-			if (res.autoFrame && !res.introActive) frameGlobe();
+			if (res.autoFrame && !res.introActive) frameFocusedPlanet();
 		};
 		fit();
 		resizeObserver = new ResizeObserver(fit);
@@ -680,115 +961,158 @@
 
 		const tick = () => {
 			animationId = requestAnimationFrame(tick);
-			// West→east (prograde): negative Y with SphereGeometry UV / equirect mapping.
-			globe.rotation.y -= 0.0015;
-			controls.update();
-			webgl.render(nextScene, camera);
+			const res = sceneResources;
+			if (res) {
+				// West→east (prograde): negative Y with SphereGeometry UV / equirect mapping.
+				for (const planet of res.planets.values()) {
+					planet.globe.rotation.y -= 0.0015;
+				}
+				res.controls.update();
+				webgl.render(res.scene, res.camera);
+			}
 		};
 		tick();
 
-		loadedVariant = variant;
-	}
-
-	/** Load first texture, reveal earth, zoom from intro distance to framed view. */
-	async function finishIntroWithTexture(
-		url: string,
-		opts: {
-			depolarSquare?: boolean;
-			emptyFillColor?: string;
-			variant?: 'card' | 'stage';
-		} = {}
-	) {
-		const res = sceneResources;
-		if (!res || !renderer) throw new Error('Sphere scene is not ready');
-
-		const seq = ++textureLoadSeq;
-		const texture = await loadTexture(url, opts);
-		if (seq !== textureLoadSeq || !sceneResources || sceneResources !== res) {
-			texture.dispose();
-			return;
-		}
-
-		res.material.map = texture;
-		res.material.color.set(0xffffff);
-		res.material.needsUpdate = true;
-		res.texture = texture;
-		res.earth.visible = true;
-
-		const el = renderer.domElement.parentElement;
-		if (el) {
-			const w = el.clientWidth || 1;
-			const h = el.clientHeight || 1;
-			res.camera.aspect = w / h;
-			res.camera.updateProjectionMatrix();
-			renderer.setSize(w, h, false);
-		}
-
-		const targetDistance = res.isStage
-			? framedFitDistance(res.camera)
-			: CARD_FRAMED_DISTANCE;
-		await animateIntroZoom(
-			res.camera,
-			res.controls,
-			INTRO_DISTANCE,
-			targetDistance,
-			res.lookDir
-		);
-		if (!sceneResources || sceneResources !== res) return;
-
-		res.introActive = false;
-		res.controls.maxDistance = res.userMaxDistance;
-		res.controls.minDistance = res.userMinDistance;
-		res.controls.enabled = true;
-		if (res.isStage) res.autoFrame = true;
-
-		loadedPreviewUrl = url;
-		statusMessage = '';
-	}
-
-	async function mountGlobe(
-		el: HTMLDivElement,
-		url: string,
-		opts: {
-			depolarSquare?: boolean;
-			emptyFillColor?: string;
-			variant?: 'card' | 'stage';
-		} = {}
-	) {
-		ensureScene(el, opts.variant ?? 'card');
-		await finishIntroWithTexture(url, opts);
+		loadedVariant = nextVariant;
+		if (isStage) attachPlanetClickHandlers(webgl.domElement);
 	}
 
 	/**
-	 * Swap globe albedo only — keeps camera, orbit target, and spin.
-	 * Mounts the full scene only on first load (or variant change).
+	 * Focus an existing planet, or spawn + texture + fly/frame a new one.
+	 * First planet in the session uses the far starfield intro (INTRO_DISTANCE → framed).
 	 */
-	async function applyGlobeTexture(
-		el: HTMLDivElement,
+	export async function focusOrCreatePlanet(
+		id: string,
 		url: string,
-		opts: {
-			depolarSquare?: boolean;
-			emptyFillColor?: string;
-			variant?: 'card' | 'stage';
-		} = {}
-	) {
+		opts: TextureOpts = {}
+	): Promise<void> {
+		const el = container;
+		if (!el) return;
+		if (focusFlight) await focusFlight;
 		if (mounting) await mounting;
 		if (finishing) await finishing;
 
-		const nextVariant = opts.variant ?? 'card';
-		if (!viewerReady() || loadedVariant !== nextVariant) {
-			const p = mountGlobe(el, url, opts);
+		ensureScene(el, variant);
+		const res = sceneResources;
+		if (!res || !renderer) throw new Error('Sphere scene is not ready');
+
+		const existing = res.planets.get(id);
+		if (existing) {
+			if (url !== existing.loadedUrl) {
+				await applyTextureToPlanet(existing, url, opts);
+			}
+			if (res.focusedId === id && !res.introActive) {
+				statusMessage = '';
+				return;
+			}
+			await finishFocusOnPlanet(existing, !res.hadFirstIntro);
+			return;
+		}
+
+		const position = pickPlanetPosition(res.planets, id);
+		const planet = createPlanetEntry(id, position);
+		const fromIntro = !res.hadFirstIntro;
+
+		try {
+			const ok = await applyTextureToPlanet(planet, url, opts);
+			if (!ok || !sceneResources?.planets.has(id)) return;
+			await finishFocusOnPlanet(planet, fromIntro);
+		} catch (err) {
+			if (sceneResources?.planets.get(id) === planet && !planet.texture) {
+				disposePlanet(planet);
+				sceneResources.planets.delete(id);
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Silent hot-swap on one planet — no camera move.
+	 * If missing, create at placement; only intro/focus when nothing is focused yet.
+	 */
+	export async function updatePlanetTexture(
+		id: string,
+		url: string,
+		opts: TextureOpts = {}
+	): Promise<void> {
+		const el = container;
+		if (!el) return;
+		if (mounting) await mounting;
+		if (finishing) await finishing;
+
+		ensureScene(el, variant);
+		const res = sceneResources;
+		if (!res) throw new Error('Sphere scene is not ready');
+
+		const existing = res.planets.get(id);
+		if (existing) {
+			if (url === existing.loadedUrl) {
+				statusMessage = '';
+				return;
+			}
+			const view = captureViewState(existing);
+			const ok = await applyTextureToPlanet(existing, url, opts);
+			if (!ok) return;
+			restoreViewState(existing, view);
+			statusMessage = '';
+			return;
+		}
+
+		const position = pickPlanetPosition(res.planets, id);
+		const planet = createPlanetEntry(id, position);
+		const shouldFocus = !res.focusedId && !res.hadFirstIntro;
+
+		try {
+			const ok = await applyTextureToPlanet(planet, url, opts);
+			if (!ok || !sceneResources?.planets.has(id)) return;
+			if (shouldFocus) {
+				await finishFocusOnPlanet(planet, true);
+			}
+			statusMessage = '';
+		} catch (err) {
+			if (sceneResources?.planets.get(id) === planet && !planet.texture) {
+				disposePlanet(planet);
+				sceneResources.planets.delete(id);
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Card path: swap albedo or run first intro. Keeps camera / spin on hot-swap.
+	 */
+	async function applyCardTexture(el: HTMLDivElement, url: string, opts: TextureOpts = {}) {
+		if (mounting) await mounting;
+		if (finishing) await finishing;
+
+		ensureScene(el, 'card');
+		const res = sceneResources;
+		if (!res) throw new Error('Sphere scene is not ready');
+
+		let planet = res.planets.get(CARD_PLANET_ID);
+		if (!planet) {
+			const p = (async () => {
+				planet = createPlanetEntry(CARD_PLANET_ID, new THREE.Vector3(0, 0, 0));
+				const ok = await applyTextureToPlanet(planet, url, opts);
+				if (!ok || !sceneResources?.planets.has(CARD_PLANET_ID)) return;
+				await finishFocusOnPlanet(planet, true);
+			})();
 			mounting = p.finally(() => {
 				mounting = null;
 			});
 			await p;
 			return;
 		}
-		if (url === loadedPreviewUrl) return;
+
+		if (url === planet.loadedUrl) return;
 
 		// Starfield waiting for first texture — run intro zoom (not a silent hot-swap).
-		if (!loadedPreviewUrl) {
-			const p = finishIntroWithTexture(url, opts);
+		if (!planet.texture || !planet.loadedUrl) {
+			const p = (async () => {
+				const ok = await applyTextureToPlanet(planet!, url, opts);
+				if (!ok || !sceneResources?.planets.has(CARD_PLANET_ID)) return;
+				await finishFocusOnPlanet(planet!, !res.hadFirstIntro);
+			})();
 			finishing = p.finally(() => {
 				finishing = null;
 			});
@@ -796,46 +1120,26 @@
 			return;
 		}
 
-		const seq = ++textureLoadSeq;
-		const view = captureViewState();
-		const texture = await loadTexture(url, opts);
-		if (seq !== textureLoadSeq || !viewerReady() || !sceneResources) {
-			texture.dispose();
-			return;
-		}
-
-		const prev = sceneResources.texture;
-		sceneResources.material.map = texture;
-		sceneResources.material.color.set(0xffffff);
-		sceneResources.material.needsUpdate = true;
-		sceneResources.texture = texture;
-		sceneResources.earth.visible = true;
-		prev?.dispose();
-		restoreViewState(view);
-		loadedPreviewUrl = url;
+		const view = captureViewState(planet);
+		const ok = await applyTextureToPlanet(planet, url, opts);
+		if (!ok) return;
+		restoreViewState(planet, view);
 	}
 
 	/** Silent hot-swap when already viewing; starfield is the first-mount loading state. */
-	async function showGlobe(
-		el: HTMLDivElement,
-		url: string,
-		opts: {
-			depolarSquare?: boolean;
-			emptyFillColor?: string;
-			variant?: 'card' | 'stage';
-		} = {}
-	) {
-		const hot = viewerReady() && loadedVariant === (opts.variant ?? 'card');
-		if (hot && url === loadedPreviewUrl) {
+	async function showGlobe(el: HTMLDivElement, url: string, opts: TextureOpts = {}) {
+		const planet = getPlanet(CARD_PLANET_ID);
+		const hot = viewerReady() && loadedVariant === 'card' && !!planet;
+		if (hot && planet && url === planet.loadedUrl) {
 			statusMessage = '';
 			return;
 		}
 		try {
-			await applyGlobeTexture(el, url, opts);
+			await applyCardTexture(el, url, opts);
 			statusMessage = '';
 		} catch (err) {
-			// Keep starfield if the scene is up; only tear down when there is nothing to show.
-			if (!loadedPreviewUrl) {
+			const card = getPlanet(CARD_PLANET_ID);
+			if (!card?.loadedUrl) {
 				if (!viewerReady()) {
 					disposeViewer();
 					loadedVariant = '';
@@ -867,15 +1171,25 @@
 
 		const el = container;
 		const url = src;
-		const mountOpts = {
+		const mountOpts: TextureOpts = {
 			depolarSquare,
-			emptyFillColor,
-			variant
+			emptyFillColor
 		};
 		if (!el) return;
 
+		if (variant === 'stage') {
+			ensureScene(el, 'stage');
+			if (url && sceneResources && sceneResources.planets.size === 0) {
+				void focusOrCreatePlanet('live', url, mountOpts).catch((err) => {
+					statusMessage =
+						err instanceof Error ? err.message : 'Could not open sphere preview.';
+				});
+			}
+			return;
+		}
+
 		if (!url) {
-			ensureScene(el, variant);
+			ensureScene(el, 'card');
 			return;
 		}
 
@@ -883,24 +1197,28 @@
 
 		return () => {
 			// Invalidate in-flight texture loads when src/opts change or the effect re-runs.
-			textureLoadSeq += 1;
+			const card = getPlanet(CARD_PLANET_ID);
+			if (card) card.loadSeq += 1;
 		};
 	});
 
 	onDestroy(() => {
 		disposeViewer();
-		loadedPreviewUrl = '';
 		loadedVariant = '';
 	});
 
-	/** Wait until first texture intro finishes so archive thumbs aren't empty starfield. */
+	/** Wait until focused planet has texture and intro is done. */
 	async function waitForIntroReady(timeoutMs = 30_000) {
 		const start = performance.now();
 		while (performance.now() - start < timeoutMs) {
-			if (loadedPreviewUrl && sceneResources && !sceneResources.introActive) return true;
+			const res = sceneResources;
+			const focused = res?.focusedId ? res.planets.get(res.focusedId) : undefined;
+			if (focused?.texture && res && !res.introActive) return true;
 			await new Promise<void>((r) => requestAnimationFrame(() => r()));
 		}
-		return !!(loadedPreviewUrl && sceneResources && !sceneResources.introActive);
+		const res = sceneResources;
+		const focused = res?.focusedId ? res.planets.get(res.focusedId) : undefined;
+		return !!(focused?.texture && res && !res.introActive);
 	}
 
 	/** Snapshot the WebGL canvas for archive gallery thumbs (stage / preserveDrawingBuffer). */

@@ -22,12 +22,19 @@
 
 	const POLL_MS = 60_000;
 
+	type TextureOpts = { depolarSquare?: boolean; emptyFillColor?: string };
+
 	type ViewerHandle = {
 		captureThumbBlob: (type?: string, quality?: number) => Promise<Blob | null>;
+		focusOrCreatePlanet: (id: string, url: string, opts?: TextureOpts) => Promise<void>;
+		updatePlanetTexture: (id: string, url: string, opts?: TextureOpts) => Promise<void>;
 	};
 
-	let previewUrl = $state<string | null>(null);
+	/** Live job preview URL — drives stage bootstrap via `src`; archive clicks use the imperative API. */
+	let liveUrl = $state<string | null>(null);
 	let placeName = $state<string | null>(null);
+	/** Place chip for the live planet (kept while viewing archives). */
+	let livePlaceName = $state<string | null>(null);
 	let liveJobId = $state<string | null>(null);
 	let liveDisplayName = $state('Latest');
 	let fallback = $state(false);
@@ -45,6 +52,8 @@
 	let isFullscreen = $state(false);
 	let fullscreenSupported = $state(false);
 	let pollId: ReturnType<typeof setInterval> | undefined;
+	/** True once the live planet has been created/focused at least once. */
+	let livePlanetReady = $state(false);
 
 	const textureNames = $derived(archivedNames.filter((name) => !isThumbFilename(name)));
 	const controlsRight = $derived(
@@ -63,8 +72,12 @@
 	function startPolling() {
 		stopPolling();
 		pollId = setInterval(() => {
-			if (!selectedArchive) void refreshLive();
+			void refreshLive();
 		}, POLL_MS);
+	}
+
+	function liveTextureOpts(): TextureOpts {
+		return { depolarSquare: fallback, emptyFillColor: emptyFill };
 	}
 
 	async function refreshArchiveMeta(names: string[] = archivedNames) {
@@ -94,21 +107,36 @@
 	}
 
 	async function refreshLive() {
-		if (selectedArchive) return;
 		try {
 			const job = await getLatestGlobe();
 			const nextUrl = job.fallback ? '/rip.jpeg' : job.spherePreviewUrl;
 			if (!nextUrl) throw new Error('No sphere preview URL');
-			previewUrl = nextUrl;
-			placeName = job.placeName?.trim() || null;
+			liveUrl = nextUrl;
 			liveJobId = job.fallback !== true && job.id ? job.id : null;
-			liveDisplayName = placeName || (job.fallback ? 'Unavailable' : 'Globe');
+			const nextPlace = job.placeName?.trim() || null;
+			livePlaceName = nextPlace;
+			liveDisplayName = nextPlace || (job.fallback ? 'Unavailable' : 'Globe');
 			fallback = job.fallback === true;
 			emptyFill = job.emptyFillColor || '#808080';
 			error = null;
 
-			if (job.fallback !== true && job.id) {
-				await tick();
+			if (!selectedArchive) {
+				placeName = nextPlace;
+			}
+
+			await tick();
+			if (viewer) {
+				const opts = liveTextureOpts();
+				if (!selectedArchive && !livePlanetReady) {
+					await viewer.focusOrCreatePlanet('live', nextUrl, opts);
+					livePlanetReady = true;
+				} else {
+					await viewer.updatePlanetTexture('live', nextUrl, opts);
+					if (!livePlanetReady) livePlanetReady = true;
+				}
+			}
+
+			if (job.fallback !== true && job.id && !selectedArchive) {
 				archivedNames = await archiveLivePreview({
 					filename: archiveNameForJob(job),
 					sourceUrl: nextUrl,
@@ -119,23 +147,39 @@
 				await refreshArchiveMeta(archivedNames);
 			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Could not load latest globe.';
+			if (!liveUrl) {
+				error = err instanceof Error ? err.message : 'Could not load latest globe.';
+			} else {
+				console.warn('Live globe refresh failed', err);
+			}
 		}
 	}
 
 	async function selectArchive(filename: string) {
 		selectedArchive = filename || '';
-		if (selectedArchive) {
-			stopPolling();
-			previewUrl = archiveFileUrl(selectedArchive);
-			placeName = labelForArchive(selectedArchive);
-			fallback = false;
-			emptyFill = '#808080';
-			error = null;
-			return;
+		error = null;
+		await tick();
+		if (!viewer) return;
+
+		try {
+			if (selectedArchive) {
+				placeName = labelForArchive(selectedArchive);
+				await viewer.focusOrCreatePlanet(selectedArchive, archiveFileUrl(selectedArchive), {
+					depolarSquare: false,
+					emptyFillColor: '#808080'
+				});
+				return;
+			}
+			placeName = livePlaceName;
+			if (liveUrl) {
+				await viewer.focusOrCreatePlanet('live', liveUrl, liveTextureOpts());
+				livePlanetReady = true;
+			} else {
+				await refreshLive();
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Could not open globe.';
 		}
-		startPolling();
-		await refreshLive();
 	}
 
 	function setArchivePaneOpen(open: boolean) {
@@ -203,14 +247,15 @@
 >
 	<DistortedPanoramaViewer
 		bind:this={viewer}
-		src={previewUrl ?? ''}
+		src={liveUrl ?? ''}
 		title={placeName ?? 'Latest planet'}
 		variant="stage"
 		depolarSquare={fallback}
 		emptyFillColor={emptyFill}
 		hideFullscreenButton={true}
+		onPlanetFocus={(id) => void selectArchive(id === 'live' ? '' : id)}
 	/>
-	{#if previewUrl && placeName && !selectedArchive}
+	{#if placeName && !selectedArchive && liveUrl}
 		{#if liveJobId}
 			<a
 				href={`/?job=${encodeURIComponent(liveJobId)}`}
@@ -233,7 +278,7 @@
 			{labelForArchive(selectedArchive)}
 		</p>
 	{/if}
-	{#if error && !previewUrl}
+	{#if error && !liveUrl}
 		<p
 			class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center px-4 text-center text-sm text-ink-subtle"
 		>
