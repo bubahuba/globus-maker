@@ -4,11 +4,16 @@
 	import {
 		archiveDisplayLabel,
 		archiveFileUrl,
+		archiveLabelFromMeta,
 		archiveLivePreview,
+		archiveMetaFromJob,
 		archiveNameForJob,
+		formatArchiveMetaTooltip,
 		isThumbFilename,
 		listArchivedPreviews,
-		thumbNameFor
+		loadArchiveMetaMap,
+		thumbNameFor,
+		type ArchiveImageMeta
 	} from '@lib/api/globe-preview';
 	import DistortedPanoramaViewer from '@lib/components/DistortedPanoramaViewer.svelte';
 	import SeoHead from '@lib/components/SeoHead.svelte';
@@ -30,6 +35,7 @@
 	/** Empty = follow live API; otherwise a filename under /api/globe-preview/. */
 	let selectedArchive = $state('');
 	let archivedNames = $state<string[]>([]);
+	let archiveMetaByName = $state<Record<string, ArchiveImageMeta>>({});
 	let archivePaneOpen = $state(false);
 
 	let viewer = $state<ViewerHandle | undefined>();
@@ -59,12 +65,30 @@
 		}, POLL_MS);
 	}
 
+	async function refreshArchiveMeta(names: string[] = archivedNames) {
+		const textures = names.filter((name) => !isThumbFilename(name));
+		if (textures.length === 0) {
+			archiveMetaByName = {};
+			return;
+		}
+		try {
+			archiveMetaByName = await loadArchiveMetaMap(textures, names);
+		} catch (err) {
+			console.warn('Could not load archive image metadata', err);
+		}
+	}
+
 	async function refreshArchiveList() {
 		try {
 			archivedNames = await listArchivedPreviews();
+			await refreshArchiveMeta(archivedNames);
 		} catch (err) {
 			console.warn('Could not list archived globes', err);
 		}
+	}
+
+	function labelForArchive(name: string): string {
+		return archiveLabelFromMeta(archiveMetaByName[name], archiveDisplayLabel(name));
 	}
 
 	async function refreshLive() {
@@ -86,8 +110,10 @@
 					filename: archiveNameForJob(job),
 					sourceUrl: nextUrl,
 					knownNames: archivedNames,
+					meta: archiveMetaFromJob(job),
 					captureThumb: async () => (viewer ? viewer.captureThumbBlob() : null)
 				});
+				await refreshArchiveMeta(archivedNames);
 			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Could not load latest globe.';
@@ -99,7 +125,7 @@
 		if (selectedArchive) {
 			stopPolling();
 			previewUrl = archiveFileUrl(selectedArchive);
-			placeName = archiveDisplayLabel(selectedArchive);
+			placeName = labelForArchive(selectedArchive);
 			fallback = false;
 			emptyFill = '#808080';
 			error = null;
@@ -184,15 +210,15 @@
 		/>
 		{#if placeName && !selectedArchive}
 			<p
-				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-ink/90 backdrop-blur-sm"
+				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
 			>
 				{placeName}
 			</p>
 		{:else if selectedArchive}
 			<p
-				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-ink/90 backdrop-blur-sm"
+				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
 			>
-				{archiveDisplayLabel(selectedArchive)}
+				{labelForArchive(selectedArchive)}
 			</p>
 		{/if}
 	{:else if error}
@@ -321,6 +347,8 @@
 									? 'bg-panel-muted ring-1 ring-line'
 									: ''}"
 								aria-current={selectedArchive === name ? 'true' : 'false'}
+								title={formatArchiveMetaTooltip(archiveMetaByName[name]) ||
+									labelForArchive(name)}
 								onclick={() => void selectArchive(name)}
 							>
 								{#if archivedNames.includes(thumbNameFor(name))}
@@ -340,7 +368,7 @@
 								<span
 									class="line-clamp-2 w-full text-center text-[0.65rem] leading-tight font-medium break-words"
 								>
-									{archiveDisplayLabel(name)}
+									{labelForArchive(name)}
 								</span>
 							</button>
 						</li>

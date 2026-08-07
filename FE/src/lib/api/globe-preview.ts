@@ -1,7 +1,19 @@
 /** Same-origin proxy to monitor PHP archive APIs (`MONITOR_ORIGIN` / rgb.sk). */
 
+import {
+	archiveLabelFromMeta,
+	archiveMetaFromJob,
+	archiveMetaQuery,
+	formatArchiveMetaTooltip,
+	parseArchiveImageMeta,
+	type ArchiveImageMeta
+} from '@shared/archive-image-meta';
+
 const IMAGE_NAME_RE = /\.(jpe?g|png|webp)$/i;
 const THUMB_NAME_RE = /-thumb\.(jpe?g|png|webp)$/i;
+
+export type { ArchiveImageMeta };
+export { archiveLabelFromMeta, archiveMetaFromJob, formatArchiveMetaTooltip };
 
 export function isThumbFilename(name: string): boolean {
 	return THUMB_NAME_RE.test(name);
@@ -33,7 +45,7 @@ export function archiveNameForJob(job: { placeName?: string | null; id?: string 
 	return sanitizeArchiveName(`${place}-${id}.jpg`);
 }
 
-/** Gallery label: drop extension and trailing job-id / timestamp suffix. */
+/** Gallery label fallback: drop extension and trailing job-id / timestamp suffix. */
 export function archiveDisplayLabel(filename: string): string {
 	const stem = String(filename || '')
 		.replace(THUMB_NAME_RE, '')
@@ -63,9 +75,13 @@ async function headExists(filename: string): Promise<boolean> {
 	return !!head?.ok;
 }
 
-export async function saveArchivedPreview(filename: string, blob: Blob): Promise<boolean> {
+export async function saveArchivedPreview(
+	filename: string,
+	blob: Blob,
+	meta?: ArchiveImageMeta | null
+): Promise<boolean> {
 	const response = await fetch(
-		`/api/globe-preview/save?name=${encodeURIComponent(filename)}`,
+		`/api/globe-preview/save?name=${encodeURIComponent(filename)}${archiveMetaQuery(meta)}`,
 		{
 			method: 'POST',
 			body: blob,
@@ -73,6 +89,41 @@ export async function saveArchivedPreview(filename: string, blob: Blob): Promise
 		}
 	);
 	return response.ok || response.status === 201 || response.status === 204;
+}
+
+/** Read GM1: JPEG COM metadata from an archived image (prefer thumbs). */
+export async function fetchArchiveImageMeta(filename: string): Promise<ArchiveImageMeta | null> {
+	try {
+		const response = await fetch(`${archiveFileUrl(filename)}?meta=1`, { cache: 'no-store' });
+		if (!response.ok) return null;
+		const buffer = await response.arrayBuffer();
+		return parseArchiveImageMeta(buffer);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Load metadata for texture filenames from their `-thumb.jpg` (fallback: texture itself).
+ */
+export async function loadArchiveMetaMap(
+	textureNames: string[],
+	knownNames: string[] = textureNames
+): Promise<Record<string, ArchiveImageMeta>> {
+	const names = new Set(knownNames);
+	const entries = await Promise.all(
+		textureNames.map(async (name) => {
+			const thumb = thumbNameFor(name);
+			const source = names.has(thumb) ? thumb : name;
+			const meta = await fetchArchiveImageMeta(source);
+			return [name, meta] as const;
+		})
+	);
+	const out: Record<string, ArchiveImageMeta> = {};
+	for (const [name, meta] of entries) {
+		if (meta) out[name] = meta;
+	}
+	return out;
 }
 
 /**
@@ -84,8 +135,9 @@ export async function archiveLivePreview(opts: {
 	sourceUrl: string;
 	captureThumb: () => Promise<Blob | null>;
 	knownNames?: string[];
+	meta?: ArchiveImageMeta | null;
 }): Promise<string[]> {
-	const { filename, sourceUrl, captureThumb, knownNames = [] } = opts;
+	const { filename, sourceUrl, captureThumb, knownNames = [], meta = null } = opts;
 	if (!filename || !sourceUrl) return knownNames;
 
 	const thumbName = thumbNameFor(filename);
@@ -103,7 +155,7 @@ export async function archiveLivePreview(opts: {
 		const imageRes = await fetch(sourceUrl, { cache: 'no-store' });
 		if (!imageRes.ok) return [...names];
 		const blob = await imageRes.blob();
-		const ok = await saveArchivedPreview(filename, blob);
+		const ok = await saveArchivedPreview(filename, blob, meta);
 		if (!ok) return [...names];
 		names.add(filename);
 	}
@@ -112,7 +164,7 @@ export async function archiveLivePreview(opts: {
 		try {
 			const thumbBlob = await captureThumb();
 			if (thumbBlob) {
-				const ok = await saveArchivedPreview(thumbName, thumbBlob);
+				const ok = await saveArchivedPreview(thumbName, thumbBlob, meta);
 				if (ok) names.add(thumbName);
 			}
 		} catch (err) {

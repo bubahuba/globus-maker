@@ -522,8 +522,16 @@ app.post("/api/globe-preview/save", async (c) => {
   if (body.byteLength === 0) return c.text("Empty body", 400);
   if (body.byteLength > 32 * 1024 * 1024) return c.text("Too large", 413);
 
+  // Forward optional archive metadata for JPEG COM embed (GD strips EXIF).
+  const metaParams = new URLSearchParams();
+  metaParams.set("name", name);
+  for (const key of ["placeName", "lat", "lng", "sideMeters"] as const) {
+    const value = c.req.query(key);
+    if (value != null && value !== "") metaParams.set(key, value);
+  }
+
   const upstream = await fetch(
-    `${monitorOrigin(c.env)}/globe-preview/save.php?name=${encodeURIComponent(name)}`,
+    `${monitorOrigin(c.env)}/globe-preview/save.php?${metaParams.toString()}`,
     {
       method: "POST",
       body,

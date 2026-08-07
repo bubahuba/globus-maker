@@ -5,6 +5,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
+import {
+	archiveLabelFromMeta,
+	archiveMetaFromJob,
+	archiveMetaQuery,
+	formatArchiveMetaTooltip,
+	parseArchiveImageMeta
+} from './archive-image-meta.js';
 
 /** Production Globe Maker origin (API + preview files). */
 const GLOBE_ORIGIN = 'https://globe.rgb.sk';
@@ -48,12 +55,16 @@ let loadedPreviewUrl = '';
 /** Empty string = follow latest API job; otherwise a filename under /globe-preview/. */
 let selectedArchive = '';
 let archivedNames = [];
+/** placeName/lat/lng/sideMeters from thumb JPEG COM, keyed by texture filename. */
+let archiveMetaByName = {};
 /** Place label for the live (API) option — updated on each successful live fetch. */
 let liveDisplayName = '';
 let pollTimer = 0;
 let archivePaneOpen = false;
 /** Last live job opts so gallery can return to live without a full remount when possible. */
 let lastLiveJob = null;
+/** Meta used when archiving the current live job. */
+let lastArchiveMeta = null;
 /** Ignore stale async texture loads when polls/clicks overlap. */
 let textureLoadSeq = 0;
 
@@ -793,8 +804,8 @@ async function headExists(filename) {
 	return !!head?.ok;
 }
 
-async function postArchiveBlob(filename, blob) {
-	const saveUrl = `${PREVIEW_SAVE_URL}?name=${encodeURIComponent(filename)}`;
+async function postArchiveBlob(filename, blob, meta = null) {
+	const saveUrl = `${PREVIEW_SAVE_URL}?name=${encodeURIComponent(filename)}${archiveMetaQuery(meta)}`;
 	const saveRes = await fetch(saveUrl, {
 		method: 'POST',
 		body: blob,
@@ -811,17 +822,53 @@ async function postArchiveBlob(filename, blob) {
 	return true;
 }
 
+async function fetchArchiveImageMeta(filename) {
+	try {
+		const response = await fetch(`${archiveUrl(filename)}?meta=1`, { cache: 'no-store' });
+		if (!response.ok) return null;
+		return parseArchiveImageMeta(await response.arrayBuffer());
+	} catch {
+		return null;
+	}
+}
+
+async function refreshArchiveMeta(names = archivedNames) {
+	const textures = names.filter((name) => !isThumbFilename(name));
+	if (textures.length === 0) {
+		archiveMetaByName = {};
+		return;
+	}
+	const nameSet = new Set(names);
+	const entries = await Promise.all(
+		textures.map(async (name) => {
+			const thumb = thumbNameFor(name);
+			const source = nameSet.has(thumb) ? thumb : name;
+			const meta = await fetchArchiveImageMeta(source);
+			return [name, meta];
+		})
+	);
+	const next = {};
+	for (const [name, meta] of entries) {
+		if (meta) next[name] = meta;
+	}
+	archiveMetaByName = next;
+}
+
+function labelForArchive(name) {
+	return archiveLabelFromMeta(archiveMetaByName[name], archiveDisplayLabel(name));
+}
+
 function rememberArchived(...names) {
 	archivedNames = [...new Set([...archivedNames, ...names.filter(Boolean)])].sort((a, b) =>
 		a.localeCompare(b, undefined, { sensitivity: 'base' })
 	);
-	rebuildArchiveGallery();
+	void refreshArchiveMeta(archivedNames).then(() => rebuildArchiveGallery());
 }
 
 /**
  * After the live globe is on screen: store equirect map + canvas screenshot (-thumb).
  */
-async function archiveLivePreview(filename, sourceUrl) {
+async function archiveLivePreview(filename, sourceUrl, meta = null) {
 	if (!filename || !sourceUrl) return;
 	const thumbName = thumbNameFor(filename);
 	const hasTexture = archivedNames.includes(filename) || (await headExists(filename));
@@ -835,14 +882,14 @@ async function archiveLivePreview(filename, sourceUrl) {
 		const imageRes = await fetch(sourceUrl, { mode: 'cors', cache: 'no-store' });
 		if (!imageRes.ok) return;
 		const blob = await imageRes.blob();
-		const ok = await postArchiveBlob(filename, blob);
+		const ok = await postArchiveBlob(filename, blob, meta);
 		if (!ok) return;
 	}
 
 	if (!hasThumb) {
 		try {
 			const thumbBlob = await captureGlobeThumbBlob();
-			await postArchiveBlob(thumbName, thumbBlob);
+			await postArchiveBlob(thumbName, thumbBlob, meta);
 		} catch (err) {
 			console.warn('Could not capture globe thumb', err);
 		}
@@ -890,6 +937,9 @@ function rebuildArchiveGallery() {
 		btn.setAttribute('aria-current', selectedArchive === name ? 'true' : 'false');
 
 		const thumbName = thumbNameFor(name);
+		const displayLabel = labelForArchive(name);
+		const tip = formatArchiveMetaTooltip(archiveMetaByName[name]) || displayLabel;
+		btn.title = tip;
 		if (archivedNames.includes(thumbName)) {
 			const img = document.createElement('img');
 			img.className = 'archive-thumb';
@@ -906,7 +956,7 @@ function rebuildArchiveGallery() {
 
 		const label = document.createElement('span');
 		label.className = 'archive-name';
-		label.textContent = archiveDisplayLabel(name);
+		label.textContent = displayLabel;
 		btn.appendChild(label);
 		btn.addEventListener('click', () => void selectArchive(name));
 		grid.appendChild(btn);
@@ -917,13 +967,14 @@ function rebuildArchiveGallery() {
 
 async function refreshArchiveList() {
 	await listArchivedPreviews();
+	await refreshArchiveMeta(archivedNames);
 	rebuildArchiveGallery();
 }
 
 async function loadArchivedPreview(filename) {
 	const url = archiveUrl(filename);
 	await showGlobe(url, { depolarSquare: false });
-	const label = archiveDisplayLabel(filename);
+	const label = labelForArchive(filename);
 	setPlaceLabel(label);
 	document.title = `${label} — Globe Monitor`;
 }
@@ -953,6 +1004,7 @@ async function refreshLive() {
 	try {
 		const job = await fetchLatestGlobe();
 		lastLiveJob = job;
+		lastArchiveMeta = archiveMetaFromJob(job);
 		liveDisplayName = placeLabelFromJob(job);
 		rebuildArchiveGallery();
 
@@ -979,7 +1031,7 @@ async function refreshLive() {
 				: 'Globe Maker — Globe Monitor';
 
 		if (job.fallback !== true && job.id) {
-			void archiveLivePreview(archiveNameForJob(job), previewUrl);
+			void archiveLivePreview(archiveNameForJob(job), previewUrl, lastArchiveMeta);
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Could not load globe preview.';

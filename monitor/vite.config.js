@@ -1,10 +1,15 @@
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+	archiveMetaFromQuery,
+	injectArchiveImageMeta
+} from '../shared/archive-image-meta.ts';
 
 const monitorRoot = dirname(fileURLToPath(import.meta.url));
 const threePkg = resolve(monitorRoot, '../FE/node_modules/three');
 const previewDir = resolve(monitorRoot, 'globe-preview');
+const sharedDir = resolve(monitorRoot, '../shared');
 const port = Number(process.env.MONITOR_PORT || 5193);
 const apiOrigin = (process.env.MONITOR_API_ORIGIN || 'https://globe.rgb.sk').replace(/\/$/, '');
 
@@ -60,7 +65,10 @@ function globePreviewArchivePlugin() {
 						const chunks = [];
 						for await (const chunk of req) chunks.push(chunk);
 						await mkdir(previewDir, { recursive: true });
-						await writeFile(resolve(previewDir, filename), Buffer.concat(chunks));
+						const raw = Buffer.concat(chunks);
+						const meta = archiveMetaFromQuery(url.searchParams);
+						const bytes = meta ? injectArchiveImageMeta(raw, meta) : raw;
+						await writeFile(resolve(previewDir, filename), Buffer.from(bytes));
 						res.statusCode = 201;
 						res.end('Created');
 						return;
@@ -95,7 +103,8 @@ export default {
 			{
 				find: /^three\/addons\/(.*)/,
 				replacement: `${resolve(threePkg, 'examples/jsm')}/$1`
-			}
+			},
+			{ find: /^@shared\/(.*)/, replacement: `${sharedDir}/$1` }
 		]
 	},
 	server: {
@@ -103,7 +112,7 @@ export default {
 		strictPort: true,
 		open: `/?origin=${encodeURIComponent(apiOrigin)}`,
 		fs: {
-			allow: [monitorRoot, resolve(monitorRoot, '../FE/node_modules')]
+			allow: [monitorRoot, sharedDir, resolve(monitorRoot, '../FE/node_modules')]
 		}
 	},
 	clearScreen: false
