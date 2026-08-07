@@ -2,6 +2,7 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { getLatestGlobe } from '@lib/api/jobs';
 	import {
+		archiveDirectFileUrl,
 		archiveDisplayLabel,
 		archiveFileUrl,
 		archiveLabelFromMeta,
@@ -366,7 +367,7 @@
 								{#if archivedNames.includes(thumbNameFor(name))}
 									<img
 										class="aspect-square w-full rounded-[22%] object-cover"
-										src={`${archiveFileUrl(thumbNameFor(name))}?v=2`}
+										src={`${archiveDirectFileUrl(thumbNameFor(name))}?v=2`}
 										alt=""
 										loading="lazy"
 									/>

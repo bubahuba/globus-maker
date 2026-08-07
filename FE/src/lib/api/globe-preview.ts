@@ -1,4 +1,7 @@
-/** Same-origin proxy to monitor PHP archive APIs (`MONITOR_ORIGIN` / rgb.sk). */
+/**
+ * Archive list/save/meta go through the same-origin Worker proxy.
+ * Thumbnail <img> URLs point at the monitor host directly (https://rgb.sk/…).
+ */
 
 import {
 	archiveLabelFromMeta,
@@ -12,6 +15,9 @@ import {
 const IMAGE_NAME_RE = /\.(jpe?g|png|webp)$/i;
 const THUMB_NAME_RE = /-thumb\.(jpe?g|png|webp)$/i;
 
+/** Monitor host that serves static `/globe-preview/*` JPEGs (same as Worker `MONITOR_ORIGIN`). */
+export const MONITOR_ARCHIVE_ORIGIN = 'https://rgb.sk';
+
 export type { ArchiveImageMeta };
 export { archiveLabelFromMeta, archiveMetaFromJob, formatArchiveMetaTooltip };
 
@@ -23,8 +29,15 @@ export function thumbNameFor(filename: string): string {
 	return String(filename).replace(IMAGE_NAME_RE, '-thumb.jpg');
 }
 
+/** Same-origin proxy — use for texture viewer, HEAD, meta fetch, etc. */
 export function archiveFileUrl(filename: string): string {
 	return `/api/globe-preview/${encodeURIComponent(filename)}`;
+}
+
+/** Full URL on rgb.sk for gallery thumbnails (and other static archive files). */
+export function archiveDirectFileUrl(filename: string): string {
+	const base = MONITOR_ARCHIVE_ORIGIN.replace(/\/$/, '');
+	return `${base}/globe-preview/${encodeURIComponent(filename)}`;
 }
 
 export function sanitizeArchiveName(raw: string): string {
