@@ -35,6 +35,9 @@ const API_ORIGIN = (originParam || GLOBE_ORIGIN).replace(/\/$/, '');
 
 const MAX_EDGE = 6000;
 const POLL_MS = 60_000;
+const GLOBE_SPIN = 0.0015;
+/** OrbitControls auto-rotate: ~5 min per full orbit (feels like a slow horizontal drag). */
+const AUTO_ROTATE_SPEED = 0.05;
 /** Earth obliquity — north pole tipped toward the sun (NH summer). */
 const EARTH_AXIAL_TILT_DEG = 23.44;
 /** Far start for first-mount zoom — planet reads as a bright star. */
@@ -900,6 +903,8 @@ function ensureScene(el) {
 	const controls = new OrbitControls(camera, webgl.domElement);
 	controls.enableDamping = true;
 	controls.dampingFactor = 0.06;
+	controls.autoRotate = true;
+	controls.autoRotateSpeed = AUTO_ROTATE_SPEED;
 	controls.minDistance = USER_MIN_DISTANCE;
 	controls.maxDistance = INTRO_DISTANCE + 1;
 	controls.target.set(0, 0, 0);
@@ -951,8 +956,9 @@ function ensureScene(el) {
 		const res = sceneResources;
 		if (res) {
 			for (const planet of res.planets.values()) {
-				planet.globe.rotation.y -= 0.0015;
+				planet.globe.rotation.y -= GLOBE_SPIN;
 			}
+			// autoRotate (via controls.update) slowly orbits like a gentle horizontal drag.
 			res.controls.update();
 			webgl.render(res.scene, res.camera);
 		}

@@ -8,6 +8,9 @@
 	/** Client safety net; server already serves ≤6000px equirectangular preview. */
 	const MAX_EDGE = 6000;
 	const STAR_COUNT = 4000;
+	const GLOBE_SPIN = 0.0015;
+	/** OrbitControls auto-rotate: ~5 min per full orbit (feels like a slow horizontal drag). */
+	const AUTO_ROTATE_SPEED = 0.05;
 	const SUN_DIR = new THREE.Vector3(4.2, 1.4, 2.6);
 	/** Earth obliquity — north pole tipped toward the sun (NH summer). */
 	const EARTH_AXIAL_TILT_DEG = 23.44;
@@ -909,6 +912,8 @@
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.06;
+		controls.autoRotate = true;
+		controls.autoRotateSpeed = AUTO_ROTATE_SPEED;
 		controls.minDistance = userMinDistance;
 		// Raised so OrbitControls.update() does not clamp the far intro camera.
 		controls.maxDistance = INTRO_DISTANCE + 1;
@@ -965,8 +970,9 @@
 			if (res) {
 				// West→east (prograde): negative Y with SphereGeometry UV / equirect mapping.
 				for (const planet of res.planets.values()) {
-					planet.globe.rotation.y -= 0.0015;
+					planet.globe.rotation.y -= GLOBE_SPIN;
 				}
+				// autoRotate (via controls.update) slowly orbits like a gentle horizontal drag.
 				res.controls.update();
 				webgl.render(res.scene, res.camera);
 			}
