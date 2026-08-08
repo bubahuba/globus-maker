@@ -59,7 +59,7 @@
 		id: string;
 		earth: THREE.Group;
 		globe: THREE.Mesh;
-		material: THREE.MeshStandardMaterial;
+		material: THREE.MeshPhysicalMaterial;
 		geometry: THREE.BufferGeometry;
 		texture: THREE.Texture | null;
 		atmosphereGeometry: THREE.BufferGeometry;
@@ -574,10 +574,13 @@
 		if (!res) throw new Error('Sphere scene is not ready');
 
 		const geometry = new THREE.SphereGeometry(1, 96, 64);
-		const material = new THREE.MeshStandardMaterial({
+		// Glossy varnish over the map: clearcoat specular from scene lights.
+		const material = new THREE.MeshPhysicalMaterial({
 			color: 0x0a0a12,
-			roughness: 0.92,
-			metalness: 0
+			roughness: 0.62,
+			metalness: 0.04,
+			clearcoat: 0.7,
+			clearcoatRoughness: 0.38
 		});
 		const globe = new THREE.Mesh(geometry, material);
 		globe.userData.planetId = id;
@@ -897,17 +900,16 @@
 		const stars = createStarfield();
 		nextScene.add(stars.points);
 
-		const sunLight = new THREE.DirectionalLight(0xfff1dd, 1.55);
+		const sunLight = new THREE.DirectionalLight(0xfff1dd, 1.7);
 		sunLight.position.copy(SUN_DIR);
 		nextScene.add(sunLight);
 		const sun = createSun(SUN_DIR);
 		nextScene.add(sun.sprite);
 		const flare = createSunLensflare(sun.sprite.position);
 		nextScene.add(flare.lensflare);
-		nextScene.add(new THREE.AmbientLight(0x9aa8c4, 0.42));
-		const nightFill = new THREE.DirectionalLight(0x6d7fa8, 0.22);
-		nightFill.position.set(-3.5, -0.4, -2.2);
-		nextScene.add(nightFill);
+		// Soft fill only — a second DirectionalLight would add a clearcoat specular on the night side.
+		nextScene.add(new THREE.AmbientLight(0x9aa8c4, 0.48));
+		nextScene.add(new THREE.HemisphereLight(0xb8c8e8, 0x1a2030, 0.28));
 
 		const controls = new OrbitControls(camera, webgl.domElement);
 		controls.enableDamping = true;
