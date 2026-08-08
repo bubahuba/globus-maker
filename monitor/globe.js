@@ -10,7 +10,8 @@ import {
 	archiveMetaFromJob,
 	archiveMetaQuery,
 	formatArchiveMetaTooltip,
-	parseArchiveImageMeta
+	parseArchiveImageMeta,
+	recreateSelectionHrefFromMeta
 } from './archive-image-meta.js';
 
 /** Production Globe Maker origin (API + preview files). */
@@ -135,13 +136,19 @@ function setStatus(message) {
 	}
 }
 
-/** Upper-left place chip (matches FE /latest-planet). Optional job href → Globe Maker `/?job=`. */
-function setPlaceLabel(label, jobHref = '') {
+/** External-link icon for clickable place chip (matches FE /latest-planet). */
+const PLACE_LINK_ICON = `<svg class="place-label-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+
+/**
+ * Upper-left place chip (matches FE /latest-planet).
+ * Live → `/?job=`; archive → recreate `/?mode=globe&latlng=…`.
+ */
+function setPlaceLabel(label, href = '', linkTitle = 'Open in Globe Maker') {
 	if (!placeLabelEl) return;
 	const text = label != null ? String(label).trim() : '';
 	if (!text || text === 'Unavailable') {
 		placeLabelEl.hidden = true;
-		placeLabelEl.textContent = '';
+		placeLabelEl.replaceChildren();
 		placeLabelEl.removeAttribute('href');
 		placeLabelEl.removeAttribute('title');
 		placeLabelEl.removeAttribute('target');
@@ -149,11 +156,15 @@ function setPlaceLabel(label, jobHref = '') {
 		return;
 	}
 	placeLabelEl.hidden = false;
-	placeLabelEl.textContent = text;
-	const href = jobHref != null ? String(jobHref).trim() : '';
-	if (href) {
-		placeLabelEl.href = href;
-		placeLabelEl.title = 'Open job';
+	const nextHref = href != null ? String(href).trim() : '';
+	const textSpan = document.createElement('span');
+	textSpan.className = 'place-label-text';
+	textSpan.textContent = text;
+	placeLabelEl.replaceChildren(textSpan);
+	if (nextHref) {
+		placeLabelEl.insertAdjacentHTML('beforeend', PLACE_LINK_ICON);
+		placeLabelEl.href = nextHref;
+		placeLabelEl.title = linkTitle;
 		placeLabelEl.target = '_blank';
 		placeLabelEl.rel = 'noopener noreferrer';
 	} else {
@@ -168,6 +179,10 @@ function jobPageUrl(jobId) {
 	const id = jobId != null ? String(jobId).trim() : '';
 	if (!id) return '';
 	return `${API_ORIGIN}/?job=${encodeURIComponent(id)}`;
+}
+
+function recreatePageUrl(meta) {
+	return recreateSelectionHrefFromMeta(meta, API_ORIGIN) || '';
 }
 
 function parseHex(hex) {
@@ -1358,16 +1373,25 @@ function rebuildArchiveGallery() {
 	archiveList.appendChild(liveBtn);
 
 	const textures = textureArchiveNames();
-	if (textures.length === 0) {
-		const empty = document.createElement('p');
-		empty.className = 'archive-empty';
-		empty.textContent = 'No saved globes yet';
-		archiveList.appendChild(empty);
-		return;
-	}
-
 	const grid = document.createElement('div');
 	grid.className = 'archive-grid';
+
+	const newLink = document.createElement('a');
+	newLink.className = 'archive-tile archive-tile-new';
+	newLink.href = `${API_ORIGIN}/?mode=globe`;
+	newLink.target = '_blank';
+	newLink.rel = 'noopener noreferrer';
+	newLink.title = 'Create a globe';
+	newLink.setAttribute('aria-label', 'Create a globe');
+	const newThumb = document.createElement('span');
+	newThumb.className = 'archive-thumb-placeholder archive-thumb-new';
+	newThumb.setAttribute('aria-hidden', 'true');
+	newThumb.textContent = '+';
+	const newLabel = document.createElement('span');
+	newLabel.className = 'archive-name';
+	newLabel.textContent = 'New';
+	newLink.append(newThumb, newLabel);
+	grid.appendChild(newLink);
 
 	for (const name of textures) {
 		const btn = document.createElement('button');
@@ -1420,7 +1444,8 @@ async function selectArchive(filename) {
 			const url = archiveUrl(selectedArchive);
 			const label = labelForArchive(selectedArchive);
 			await focusOrCreatePlanet(selectedArchive, url, { depolarSquare: false });
-			setPlaceLabel(label);
+			const recreateHref = recreatePageUrl(archiveMetaByName[selectedArchive]);
+			setPlaceLabel(label, recreateHref, 'Recreate in Globe Maker');
 			document.title = `${label} — Globe Monitor`;
 			return;
 		}
@@ -1440,7 +1465,7 @@ async function selectArchive(filename) {
 				lastLiveJob && lastLiveJob.fallback !== true && lastLiveJob.id
 					? jobPageUrl(lastLiveJob.id)
 					: '';
-			setPlaceLabel(liveLabel, liveJobHref);
+			setPlaceLabel(liveLabel, liveJobHref, 'Open job');
 			document.title =
 				liveDisplayName && liveDisplayName !== 'Unavailable'
 					? `${liveDisplayName} — Globe Monitor`
@@ -1488,7 +1513,7 @@ async function refreshLive() {
 				liveDisplayName && liveDisplayName !== 'Unavailable' ? liveDisplayName : '';
 			const liveJobHref =
 				job.fallback !== true && job.id ? jobPageUrl(job.id) : '';
-			setPlaceLabel(liveLabel, liveJobHref);
+			setPlaceLabel(liveLabel, liveJobHref, 'Open job');
 			document.title =
 				liveDisplayName && liveDisplayName !== 'Unavailable'
 					? `${liveDisplayName} — Globe Monitor`

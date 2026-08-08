@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { getLatestGlobe } from '@lib/api/jobs';
 	import {
 		archiveDirectFileUrl,
@@ -9,6 +10,7 @@
 		archiveLivePreview,
 		archiveMetaFromJob,
 		archiveNameForJob,
+		buildRecreateSelectionSearch,
 		formatArchiveMetaTooltip,
 		isThumbFilename,
 		listArchivedPreviews,
@@ -105,6 +107,36 @@
 	function labelForArchive(name: string): string {
 		return archiveLabelFromMeta(archiveMetaByName[name], archiveDisplayLabel(name));
 	}
+
+	function recreateHrefForArchive(name: string): string | null {
+		const meta = archiveMetaByName[name];
+		if (meta?.lat == null || meta?.lng == null) return null;
+		if (!Number.isFinite(meta.lat) || !Number.isFinite(meta.lng)) return null;
+		const search = buildRecreateSelectionSearch({
+			mode: 'globe',
+			placeName: meta.placeName,
+			lat: meta.lat,
+			lng: meta.lng,
+			sideMeters: meta.sideMeters
+		});
+		// search is `?mode=…`; resolve('/') keeps base-path correctness.
+		return `${resolve('/')}${search}`;
+	}
+
+	const archivePlaceLabel = $derived(
+		selectedArchive ? labelForArchive(selectedArchive) : ''
+	);
+	const archiveRecreateHref = $derived(
+		selectedArchive ? recreateHrefForArchive(selectedArchive) : null
+	);
+	const liveJobHref = $derived(
+		liveJobId ? (`${resolve('/')}?job=${encodeURIComponent(liveJobId)}` as const) : null
+	);
+	const newGlobeHref = $derived(`${resolve('/')}${buildRecreateSelectionSearch({ mode: 'globe' })}`);
+
+	const placeChipClass =
+		'absolute top-4 left-4 z-30 inline-flex max-w-[min(18rem,calc(100vw-7rem))] items-center gap-1 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm';
+	const placeChipLinkClass = `${placeChipClass} transition hover:bg-black/55 hover:underline`;
 
 	async function refreshLive() {
 		try {
@@ -239,6 +271,24 @@
 	images={HOME_OG_IMAGES}
 />
 
+{#snippet placeLinkIcon()}
+	<svg
+		xmlns="http://www.w3.org/2000/svg"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="h-3 w-3 shrink-0 opacity-80"
+		aria-hidden="true"
+	>
+		<path d="M15 3h6v6" />
+		<path d="M10 14 21 3" />
+		<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+	</svg>
+{/snippet}
+
 <main
 	bind:this={stageEl}
 	class="relative w-full overflow-hidden bg-black {isFullscreen
@@ -256,27 +306,27 @@
 		onPlanetFocus={(id) => void selectArchive(id === 'live' ? '' : id)}
 	/>
 	{#if placeName && !selectedArchive && liveUrl}
-		{#if liveJobId}
-			<a
-				href={`/?job=${encodeURIComponent(liveJobId)}`}
-				class="absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm transition hover:bg-black/55 hover:underline"
-				title="Open job"
-			>
-				{placeName}
+		{#if liveJobHref}
+			<a href={liveJobHref} class={placeChipLinkClass} title="Open job">
+				<span class="min-w-0 truncate">{placeName}</span>
+				{@render placeLinkIcon()}
 			</a>
 		{:else}
-			<p
-				class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
-			>
-				{placeName}
+			<p class="pointer-events-none {placeChipClass}">
+				<span class="min-w-0 truncate">{placeName}</span>
 			</p>
 		{/if}
 	{:else if selectedArchive}
-		<p
-			class="pointer-events-none absolute top-4 left-4 z-30 rounded-md bg-black/45 px-2.5 py-1 text-xs font-medium tracking-wide text-white backdrop-blur-sm"
-		>
-			{labelForArchive(selectedArchive)}
-		</p>
+		{#if archiveRecreateHref}
+			<a href={archiveRecreateHref} class={placeChipLinkClass} title="Recreate in Globe Maker">
+				<span class="min-w-0 truncate">{archivePlaceLabel}</span>
+				{@render placeLinkIcon()}
+			</a>
+		{:else}
+			<p class="pointer-events-none {placeChipClass}">
+				<span class="min-w-0 truncate">{archivePlaceLabel}</span>
+			</p>
+		{/if}
 	{/if}
 	{#if error && !liveUrl}
 		<p
@@ -389,47 +439,63 @@
 				<span class="min-w-0 flex-1 truncate text-sm font-medium">{liveDisplayName}</span>
 			</button>
 
-			{#if textureNames.length === 0}
-				<p class="px-2 py-4 text-center text-xs text-ink-subtle">No saved globes yet</p>
-			{:else}
-				<ul class="grid grid-cols-3 gap-1.5">
-					{#each textureNames as name (name)}
-						<li>
-							<button
-								type="button"
-								class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink transition hover:bg-ink/5 {selectedArchive ===
-								name
-									? 'bg-ink/10 ring-2 ring-line-strong'
-									: ''}"
-								aria-current={selectedArchive === name ? 'true' : 'false'}
-								title={formatArchiveMetaTooltip(archiveMetaByName[name]) ||
-									labelForArchive(name)}
-								onclick={() => void selectArchive(name)}
-							>
-								{#if archivedNames.includes(thumbNameFor(name))}
-									<img
-										class="aspect-square w-full rounded-[22%] object-cover"
-										src={`${archiveDirectFileUrl(thumbNameFor(name))}?v=2`}
-										alt=""
-										loading="lazy"
-									/>
-								{:else}
-									<span
-										class="flex aspect-square w-full items-center justify-center rounded-[22%] bg-canvas text-[0.6rem] text-ink-subtle"
-									>
-										MAP
-									</span>
-								{/if}
+			<ul class="grid grid-cols-3 gap-1.5">
+				<li>
+					<a
+						href={newGlobeHref}
+						class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink no-underline transition hover:bg-ink/5"
+						title="Create a globe"
+						aria-label="Create a globe"
+					>
+						<span
+							class="flex aspect-square w-full items-center justify-center rounded-[22%] border border-dashed border-line-strong/70 bg-transparent text-2xl font-light leading-none text-ink-subtle"
+							aria-hidden="true"
+						>
+							+
+						</span>
+						<span
+							class="line-clamp-2 w-full text-center text-[0.65rem] leading-tight font-medium break-words text-ink-subtle"
+						>
+							New
+						</span>
+					</a>
+				</li>
+				{#each textureNames as name (name)}
+					<li>
+						<button
+							type="button"
+							class="flex w-full flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-ink transition hover:bg-ink/5 {selectedArchive ===
+							name
+								? 'bg-ink/10 ring-2 ring-line-strong'
+								: ''}"
+							aria-current={selectedArchive === name ? 'true' : 'false'}
+							title={formatArchiveMetaTooltip(archiveMetaByName[name]) ||
+								labelForArchive(name)}
+							onclick={() => void selectArchive(name)}
+						>
+							{#if archivedNames.includes(thumbNameFor(name))}
+								<img
+									class="aspect-square w-full rounded-[22%] object-cover"
+									src={`${archiveDirectFileUrl(thumbNameFor(name))}?v=2`}
+									alt=""
+									loading="lazy"
+								/>
+							{:else}
 								<span
-									class="line-clamp-2 w-full text-center text-[0.65rem] leading-tight font-medium break-words"
+									class="flex aspect-square w-full items-center justify-center rounded-[22%] bg-canvas text-[0.6rem] text-ink-subtle"
 								>
-									{labelForArchive(name)}
+									MAP
 								</span>
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
+							{/if}
+							<span
+								class="line-clamp-2 w-full text-center text-[0.65rem] leading-tight font-medium break-words"
+							>
+								{labelForArchive(name)}
+							</span>
+						</button>
+					</li>
+				{/each}
+			</ul>
 		</div>
 	</aside>
 </main>

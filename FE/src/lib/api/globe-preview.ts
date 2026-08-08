@@ -7,9 +7,11 @@ import {
 	archiveLabelFromMeta,
 	archiveMetaFromJob,
 	archiveMetaQuery,
+	buildRecreateSelectionSearch,
 	formatArchiveMetaTooltip,
 	injectArchiveImageMeta,
 	parseArchiveImageMeta,
+	recreateSelectionHrefFromMeta,
 	type ArchiveImageMeta
 } from '@shared/archive-image-meta';
 
@@ -20,7 +22,13 @@ const THUMB_NAME_RE = /-thumb\.(jpe?g|png|webp)$/i;
 export const MONITOR_ARCHIVE_ORIGIN = 'https://rgb.sk';
 
 export type { ArchiveImageMeta };
-export { archiveLabelFromMeta, archiveMetaFromJob, formatArchiveMetaTooltip };
+export {
+	archiveLabelFromMeta,
+	archiveMetaFromJob,
+	buildRecreateSelectionSearch,
+	formatArchiveMetaTooltip,
+	recreateSelectionHrefFromMeta
+};
 
 export function isThumbFilename(name: string): boolean {
 	return THUMB_NAME_RE.test(name);

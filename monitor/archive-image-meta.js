@@ -111,3 +111,39 @@ export function archiveLabelFromMeta(meta, filenameFallback) {
 	const place = meta?.placeName?.trim();
 	return place || filenameFallback;
 }
+
+/**
+ * Query for the home page: `?mode=globe&latlng=lat,lng&sideMeters=…&placeName=…`
+ * Prefills mode switch, map pin, and square-size slider.
+ */
+export function buildRecreateSelectionSearch(input = {}) {
+	const params = new URLSearchParams();
+	params.set('mode', input.mode === 'map' ? 'map' : 'globe');
+	const lat = Number(input.lat);
+	const lng = Number(input.lng);
+	if (Number.isFinite(lat) && Number.isFinite(lng)) {
+		params.set('latlng', `${lat},${lng}`);
+	}
+	const side = Number(input.sideMeters);
+	if (Number.isFinite(side) && side > 0) {
+		params.set('sideMeters', String(Math.round(side)));
+	}
+	const place = input.placeName != null ? String(input.placeName).trim() : '';
+	if (place) params.set('placeName', place.slice(0, 120));
+	return `?${params.toString()}`;
+}
+
+/** Relative (`/…`) or absolute href; null when lat/lng are missing. */
+export function recreateSelectionHrefFromMeta(meta, origin = '') {
+	if (meta?.lat == null || meta?.lng == null) return null;
+	if (!Number.isFinite(meta.lat) || !Number.isFinite(meta.lng)) return null;
+	const search = buildRecreateSelectionSearch({
+		mode: 'globe',
+		placeName: meta.placeName,
+		lat: meta.lat,
+		lng: meta.lng,
+		sideMeters: meta.sideMeters
+	});
+	const base = String(origin || '').replace(/\/$/, '');
+	return base ? `${base}/${search}` : `/${search}`;
+}

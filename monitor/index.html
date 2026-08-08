@@ -219,6 +219,9 @@
 				top: max(1rem, env(safe-area-inset-top));
 				left: max(1rem, env(safe-area-inset-left));
 				z-index: 4;
+				display: inline-flex;
+				align-items: center;
+				gap: 0.3rem;
 				margin: 0;
 				padding: 0.25rem 0.65rem;
 				border-radius: 0.375rem;
@@ -231,10 +234,21 @@
 				-webkit-backdrop-filter: blur(6px);
 				pointer-events: none;
 				max-width: min(18rem, calc(100vw - 7rem));
+				text-decoration: none;
+			}
+
+			#place-label .place-label-text {
+				min-width: 0;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
-				text-decoration: none;
+			}
+
+			#place-label .place-label-icon {
+				flex: 0 0 auto;
+				width: 0.75rem;
+				height: 0.75rem;
+				opacity: 0.8;
 			}
 
 			#place-label[href] {
@@ -405,6 +419,24 @@
 				font-size: 0.6rem;
 			}
 
+			a.archive-tile {
+				text-decoration: none;
+				color: inherit;
+			}
+
+			.archive-tile-new .archive-thumb-new {
+				border: 1px dashed rgba(231, 229, 228, 0.35);
+				background: transparent;
+				font-size: 1.5rem;
+				font-weight: 300;
+				line-height: 1;
+				color: rgba(231, 229, 228, 0.45);
+			}
+
+			.archive-tile-new .archive-name {
+				color: rgba(231, 229, 228, 0.45);
+			}
+
 			.archive-tile .archive-name {
 				flex: none;
 				width: 100%;
@@ -539,6 +571,6 @@
 				<span class="app-label">Globe Maker</span>
 			</a>
 		</nav>
-		<script type="module" src="./globe.js?v=20"></script>
+		<script type="module" src="./globe.js?v=23"></script>
 	</body>
 </html>

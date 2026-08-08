@@ -129,6 +129,46 @@
 
 	/** Bumps to abort an in-flight poll when switching jobs. */
 	let pollEpoch = 0;
+	/** Apply `?mode=&latlng=&sideMeters=&placeName=` at most once (job URL wins). */
+	let selectionUrlApplied = false;
+
+	function parseLatLngParam(raw: string | null): LatLng | null {
+		if (!raw) return null;
+		const parts = raw.split(',').map((part) => part.trim());
+		if (parts.length !== 2) return null;
+		const lat = Number(parts[0]);
+		const lng = Number(parts[1]);
+		if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+		return { lat, lng };
+	}
+
+	function applySelectionFromUrl(params: URLSearchParams) {
+		const modeParam = params.get('mode')?.trim().toLowerCase();
+		if (modeParam === 'map' || modeParam === 'globe') mode = modeParam;
+
+		const sideRaw = params.get('sideMeters');
+		if (sideRaw != null && sideRaw !== '') {
+			const side = Number(sideRaw);
+			if (Number.isFinite(side) && side > 0) {
+				sideMeters = Math.round(Math.min(MAX_SIDE_METERS, Math.max(MIN_SIDE_METERS, side)));
+			}
+		}
+
+		const name = params.get('placeName')?.trim() || params.get('name')?.trim() || '';
+		if (name) placeName = name.slice(0, 120);
+
+		const nextCenter = parseLatLngParam(params.get('latlng'));
+		if (!nextCenter) return;
+
+		center = nextCenter;
+		clearUploadedMap();
+		if (name) {
+			lastReverseKey = `${nextCenter.lat.toFixed(5)},${nextCenter.lng.toFixed(5)},${nominatimZoomFromSideMeters(sideMeters)}`;
+		} else {
+			scheduleReversePlaceName(nextCenter, nominatimZoomFromSideMeters(sideMeters));
+		}
+	}
 
 	const jobActive = $derived(
 		!!jobId && jobStatus != null && jobStatus !== 'complete' && jobStatus !== 'failed'
@@ -501,6 +541,25 @@
 		const fromUrl = page.url.searchParams.get('job')?.trim() ?? '';
 		if (!fromUrl || fromUrl === jobId || openingJob || submitting) return;
 		void openJob(fromUrl);
+	});
+
+	// Prefill mode / pin / square size from recreate links (skipped when ?job= is present).
+	$effect(() => {
+		if (selectionUrlApplied) return;
+		const params = page.url.searchParams;
+		if (params.get('job')?.trim()) {
+			selectionUrlApplied = true;
+			return;
+		}
+		const hasSelection =
+			params.has('mode') ||
+			params.has('latlng') ||
+			params.has('sideMeters') ||
+			params.has('placeName') ||
+			params.has('name');
+		selectionUrlApplied = true;
+		if (!hasSelection) return;
+		applySelectionFromUrl(params);
 	});
 
 	async function generateStripes() {
